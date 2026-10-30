@@ -40,7 +40,8 @@ object CommandParser {
     }
 
     fun parse(input: String, isAwaitingConfirmation: Boolean = false, isAwaitingDisambiguation: Boolean = false): ParsedCommandResult {
-        val clean = input
+        val normalizedInput = CommandNormalizer.normalize(input)
+        val clean = normalizedInput
             .replace(Regex("(?i)^(hey jarvis|hi jarvis|hello jarvis|ok jarvis|jarvis|service)[,\\s]*"), "")
             .replace(Regex("[.,!?:;\"'\\s]+$"), "")
             .trim()
@@ -66,6 +67,16 @@ object CommandParser {
         }
 
         val prefix = "^(?:please\\s+|can you\\s+|could you\\s+|just\\s+)?"
+
+        // Phone Lock & Unlock Commands
+        if (clean.matches(Regex("$prefix(?:lock\\s+(?:my\\s+)?(?:phone|screen|device)|lock\\s+up)$")) ||
+            clean == "lock my phone" || clean == "lock phone" || clean == "phone lock") {
+            return ParsedCommandResult(JarvisCommand.LockPhone, 0.99f, "PHONE_LOCK")
+        }
+        if (clean.matches(Regex("$prefix(?:show\\s+)?(?:unlock\\s+screen|lock\\s+screen|keyguard)$")) ||
+            clean == "show unlock screen" || clean == "unlock screen" || clean == "dismiss keyguard") {
+            return ParsedCommandResult(JarvisCommand.ShowUnlockScreen, 0.98f, "PHONE_UNLOCK_SCREEN")
+        }
 
         // 3. Flashlight / Torch Commands (Strict Anchoring & Natural Variations across Indian languages)
         val flashWords = "(?:flash\\s*light|flash\\s*lite|flashlight|flash|torch|light|batti)"

@@ -245,4 +245,14 @@
     <style name="Theme.JarvisAssistant.CyberpunkNeon" parent="Theme.JarvisAssistant.Dark" />
     <style name="Theme.JarvisAssistant.EmeraldObsidian" parent="Theme.JarvisAssistant.Dark" />
     <style name="Theme.JarvisAssistant.RoseGold" parent="Theme.JarvisAssistant.Sunset" />
+
+    <!-- Solid Dark Futuristic Dialog Theme -->
+    <style name="JarvisAlertDialogTheme" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="android:windowBackground">@drawable/bg_jarvis_dialog</item>
+        <item name="colorSurface">#12182A</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorOnSurfaceVariant">#CBD5E1</item>
+        <item name="colorPrimary">#00E5FF</item>
+        <item name="colorOnPrimary">#070914</item>
+    </style>
 </resources>

@@ -251,7 +251,11 @@ class VoiceEnrollmentActivity : AppCompatActivity() {
                         updateEnrollmentStepUI()
                     }
                 } else {
-                    binding.tvRecordFeedback.text = "Could not detect clear speech. Please speak louder and retry."
+                    if (VoskModelManager.speakerModel == null) {
+                        binding.tvRecordFeedback.text = "Speaker model is not loaded. Voice enrollment requires the speaker pack."
+                    } else {
+                        binding.tvRecordFeedback.text = "Could not detect clear speech. Please speak louder and retry."
+                    }
                     binding.btnRecordSample.text = "RETRY SAMPLE ${currentSampleIndex + 1}"
                 }
             }

@@ -74,7 +74,7 @@ class HomeFragment : Fragment() {
 
         // Top Navigation
         binding.btnTopChat.setOnClickListener {
-            (activity as? MainActivity)?.selectTab(MainActivity.TAB_CHAT)
+            (activity as? MainActivity)?.openDrawer()
         }
 
         binding.btnTopSettings.setOnClickListener {

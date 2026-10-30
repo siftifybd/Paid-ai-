@@ -157,6 +157,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addSharedContent(text: String) {
+        val app = getApplication<JarvisApp>()
+        app.chatRepository.addTurn(text, "Received shared content for processing: \"$text\". How would you like me to handle this, Sir?")
+    }
+
     private fun sendServiceAction(action: String) {
         val intent = Intent(getApplication<Application>(), JarvisConversationService::class.java)
             .setAction(action)

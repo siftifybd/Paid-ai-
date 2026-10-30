@@ -55,5 +55,7 @@
     <string name="category_contacts">Contacts</string>
     <string name="category_routines">Routines</string>
     <string name="category_notes">Notes</string>
+    <string name="device_admin_label">JARVIS Device Admin</string>
+    <string name="device_admin_description">JARVIS-এর Voice Lock ফিচার চালু করতে ফোন লক করার অনুমতি প্রয়োজন।</string>
 </resources>
 

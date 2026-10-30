@@ -2956,14 +2956,18 @@ class JarvisConversationService : Service() {
 
         val model = VoskModelManager.model
         if (model == null) {
-            Log.i("JarvisService", "Vosk model still loading; triggering init and will start once ready")
-            VoskModelManager.init(applicationContext, serviceScope)
-            serviceScope.launch {
-                VoskModelManager.isModelReady.collect { ready ->
-                    if (ready && _isStandby.value && voskSpeechService == null) {
-                        startWakeListening()
+            if (!VoskModelManager.hasAttemptedInit) {
+                Log.i("JarvisService", "Vosk model still loading; triggering init")
+                VoskModelManager.init(applicationContext, serviceScope)
+                serviceScope.launch {
+                    VoskModelManager.isModelReady.collect { ready ->
+                        if (ready && _isStandby.value && voskSpeechService == null) {
+                            startWakeListening()
+                        }
                     }
                 }
+            } else {
+                Log.i("JarvisService", "Offline Vosk model not present; standing by for touch or live session activation.")
             }
             return
         }

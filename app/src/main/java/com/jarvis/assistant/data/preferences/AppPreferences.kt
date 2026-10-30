@@ -150,7 +150,16 @@ class AppPreferences(context: Context) {
     }
 
     var apiKey: String
-        get() = prefs.getString(KEY_API_KEY, "")?.trim() ?: ""
+        get() {
+            val stored = prefs.getString(KEY_API_KEY, "")?.trim() ?: ""
+            if (stored.isNotBlank()) return stored
+            return try {
+                val envKey = com.jarvis.assistant.BuildConfig.GEMINI_API_KEY
+                if (!envKey.isNullOrBlank() && envKey != "null" && !envKey.startsWith("your_")) envKey else ""
+            } catch (e: Throwable) {
+                ""
+            }
+        }
         set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
 
     var aiModel: String
@@ -275,6 +284,10 @@ class AppPreferences(context: Context) {
         set(value) {
             prefs.edit().putString(KEY_FAVORITE_APP, value.trim()).commit()
         }
+
+    var isMemoryEnabled: Boolean
+        get() = prefs.getBoolean("key_memory_enabled", true)
+        set(value) = prefs.edit().putBoolean("key_memory_enabled", value).apply()
 
     var isMicMuted: Boolean
         get() = prefs.getBoolean(KEY_MIC_MUTED, false)

@@ -188,21 +188,126 @@ class MainActivity : AppCompatActivity() {
         trans.commitNow()
 
         setupNavigationDock()
+        setupDrawerNavigation()
         selectTab(currentTab)
         observeViewModel()
+        handleShareIntent(intent)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (currentTab != TAB_HOME) {
+                if (binding.drawerLayout.isDrawerOpen(androidx.core.view.GravityCompat.START)) {
+                    closeDrawer()
+                } else if (currentTab != TAB_HOME) {
                     selectTab(TAB_HOME)
                 } else {
-                    // Preserve Android's normal root behavior (return to launcher) only
-                    // after the user is already on JARVIS Home.
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                     isEnabled = true
                 }
             }
         })
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!sharedText.isNullOrBlank()) {
+                selectTab(TAB_CHAT)
+                Toast.makeText(this, "Content shared to JARVIS for analysis", Toast.LENGTH_SHORT).show()
+                viewModel.addSharedContent(sharedText)
+            }
+        }
+    }
+
+    fun openDrawer() {
+        binding.drawerLayout.openDrawer(androidx.core.view.GravityCompat.START)
+    }
+
+    fun closeDrawer() {
+        binding.drawerLayout.closeDrawer(androidx.core.view.GravityCompat.START)
+    }
+
+    private fun setupDrawerNavigation() {
+        com.jarvis.assistant.automation.agent.TaskReceiptManager.init(this)
+        com.jarvis.assistant.automation.workflow.WorkflowManager.init(this)
+        com.jarvis.assistant.knowledge.KnowledgeVaultManager.init(this)
+        com.jarvis.assistant.notifications.NotificationDigestManager.init(this)
+        com.jarvis.assistant.context.SmartContextEngine.init(this)
+
+        val userName = com.jarvis.assistant.JarvisApp.instance.preferences.userName
+        if (userName.isNotBlank()) {
+            binding.drawerMenu.tvDrawerGreeting.text = "Welcome, $userName"
+        }
+
+        binding.drawerMenu.btnCloseDrawer.setOnClickListener { closeDrawer() }
+        binding.drawerMenu.tvDrawerCloseAction.setOnClickListener { closeDrawer() }
+
+        binding.drawerMenu.navDrawer500FeatureHub.setOnClickListener {
+            closeDrawer()
+            com.jarvis.assistant.features.FeatureHubActivity.start(this)
+        }
+
+        binding.drawerMenu.navDrawerBanglaPack.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.settings.LanguagePackActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerTaskReceipts.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.audit.TaskReceiptActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerWorkflows.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.workflow.WorkflowStudioActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerKnowledgeVault.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.knowledge.KnowledgeVaultActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerNotificationDigest.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.notifications.NotificationDigestActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerContextProfiles.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.settings.ProfileSelectionActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerDiagnostics.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.diagnostics.DiagnosticsActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerCameraCopilot.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.vision.CameraCopilotActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerPhoneLock.setOnClickListener {
+            closeDrawer()
+            com.jarvis.assistant.security.DeviceAdminPermissionHelper.openSetupFlow(this)
+        }
+
+        updateDrawerLockStatus()
+
+        binding.drawerMenu.navDrawerMemoryCore.setOnClickListener {
+            closeDrawer()
+            startActivity(Intent(this, com.jarvis.assistant.ui.memory.MemoryActivity::class.java))
+        }
+
+        binding.drawerMenu.navDrawerSettings.setOnClickListener {
+            closeDrawer()
+            selectTab(TAB_SETTINGS)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -213,12 +318,28 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshSettings()
+        updateDrawerLockStatus()
         val prefs = com.jarvis.assistant.JarvisApp.instance.preferences
         if (appliedThemeKey != prefs.appTheme || appliedCustomHex != prefs.customThemeColor) {
             appliedThemeKey = prefs.appTheme
             appliedCustomHex = prefs.customThemeColor
             recreate()
         }
+    }
+
+    private fun updateDrawerLockStatus() {
+        try {
+            val isAdminActive = com.jarvis.assistant.security.DeviceAdminPermissionHelper.isAdminActive(this)
+            if (isAdminActive) {
+                binding.drawerMenu.tvDrawerLockStatus.text = "ACTIVE"
+                binding.drawerMenu.tvDrawerLockStatus.setTextColor(android.graphics.Color.parseColor("#00E676"))
+                binding.drawerMenu.tvDrawerLockStatus.setBackgroundResource(com.jarvis.assistant.R.drawable.bg_jarvis_status_badge_green)
+            } else {
+                binding.drawerMenu.tvDrawerLockStatus.text = "SETUP"
+                binding.drawerMenu.tvDrawerLockStatus.setTextColor(android.graphics.Color.parseColor("#FF5252"))
+                binding.drawerMenu.tvDrawerLockStatus.setBackgroundResource(com.jarvis.assistant.R.drawable.bg_jarvis_status_badge)
+            }
+        } catch (ignored: Exception) {}
     }
 
     private fun setupNavigationDock() {

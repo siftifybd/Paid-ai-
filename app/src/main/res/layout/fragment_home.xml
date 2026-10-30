@@ -49,9 +49,9 @@
         android:layout_width="46dp"
         android:layout_height="46dp"
         android:background="@drawable/bg_jarvis_icon_square"
-        android:src="@drawable/ic_chat_bubble"
+        android:src="@drawable/ic_menu"
         app:tint="?attr/themeTextPrimary"
-        android:contentDescription="Chat"
+        android:contentDescription="Open Menu Drawer"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 

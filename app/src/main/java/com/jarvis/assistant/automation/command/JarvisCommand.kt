@@ -28,4 +28,6 @@ sealed class JarvisCommand {
     object RecallFavoriteSong : JarvisCommand()
     object RecallRoutine : JarvisCommand()
     object GoToBackground : JarvisCommand()
+    object LockPhone : JarvisCommand()
+    object ShowUnlockScreen : JarvisCommand()
 }
