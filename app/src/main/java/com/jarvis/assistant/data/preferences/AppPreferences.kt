@@ -4,11 +4,22 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.jarvis.assistant.data.model.ChatTurn
 import com.jarvis.assistant.data.model.GeminiConstants
 
 class AppPreferences(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private val securePrefs: SharedPreferences = run {
+        val app = context.applicationContext
+        val masterKey = MasterKey.Builder(app).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            app, "jarvis_secure_prefs", masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
     private val gson = Gson()
 
     init {
@@ -151,8 +162,19 @@ class AppPreferences(context: Context) {
 
     var apiKey: String
         get() {
-            val stored = prefs.getString(KEY_API_KEY, "")?.trim() ?: ""
-            if (stored.isNotBlank()) return stored
+            // 1. Try secure storage
+            val secure = securePrefs.getString(KEY_API_KEY, "")?.trim() ?: ""
+            if (secure.isNotBlank()) return secure
+
+            // 2. Fallback to old plain storage (and migrate)
+            val legacy = prefs.getString(KEY_API_KEY, "")?.trim() ?: ""
+            if (legacy.isNotBlank()) {
+                securePrefs.edit().putString(KEY_API_KEY, legacy).apply()
+                prefs.edit().remove(KEY_API_KEY).apply()
+                return legacy
+            }
+
+            // 3. Fallback to BuildConfig
             return try {
                 val envKey = com.jarvis.assistant.BuildConfig.GEMINI_API_KEY
                 if (!envKey.isNullOrBlank() && envKey != "null" && !envKey.startsWith("your_")) envKey else ""
@@ -160,7 +182,11 @@ class AppPreferences(context: Context) {
                 ""
             }
         }
-        set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+        set(value) {
+            securePrefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+            // Ensure old key is removed if it existed
+            prefs.edit().remove(KEY_API_KEY).apply()
+        }
 
     var aiModel: String
         get() {

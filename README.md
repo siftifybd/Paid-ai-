@@ -69,6 +69,7 @@ Build outputs are written under `app/build/outputs/` and are generated files, no
 - [Documentation index](docs/README.md)
 - [Voice architecture research](docs/architecture/voice-architecture-research.md)
 - [Voice issue recordings](docs/diagnostics/voice-videos/README.md)
+- Remote control (LAN + Internet): see the code in app/src/main/java/com/jarvis/assistant/remote/
 
 ## Configuration and privacy
 

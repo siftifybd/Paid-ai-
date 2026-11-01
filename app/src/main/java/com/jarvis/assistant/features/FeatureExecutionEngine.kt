@@ -30,6 +30,20 @@ object FeatureExecutionEngine {
             """.trimIndent()
         }
 
+        if (feature.title.contains("Nexus", ignoreCase = true) ||
+            feature.title.contains("Remote", ignoreCase = true) ||
+            feature.title.contains("Companion", ignoreCase = true)) {
+            com.jarvis.assistant.nexus.ui.NexusActivity.start(context)
+            return """
+                [LIVE EXECUTION SUCCESS]
+                Feature: #${feature.id} - ${feature.title}
+                Category: ${feature.category}
+                Status: ACTIVE & COMPLETED
+                
+                Details: Launched JARVIS NEXUS Wi-Fi LAN + Internet Remote Control interface.
+            """.trimIndent()
+        }
+
         return try {
             val resultDetail = when (feature.category.lowercase()) {
                 "system control & hardware automation" -> handleSystemControl(context, feature)

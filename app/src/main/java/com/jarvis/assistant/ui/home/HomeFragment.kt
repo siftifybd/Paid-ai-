@@ -27,16 +27,18 @@ import com.jarvis.assistant.util.PermissionHelper
 import android.content.res.ColorStateList
 import androidx.core.content.ContextCompat
 import com.jarvis.assistant.R
+import com.jarvis.assistant.ui.orb.OrbHelper
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-class HomeFragment : Fragment() {
+class HomeFragment : Fragment(), OrbHelper.OrbListener {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val viewModel: MainViewModel get() = (requireActivity() as MainActivity).viewModel
     private val preferences by lazy { JarvisApp.instance.preferences }
 
+    private var orbHelper: OrbHelper? = null
     private var isPageLoaded = false
     private var pendingOrbState: String? = null
     private var pendingThemeKey: String? = null
@@ -53,8 +55,10 @@ class HomeFragment : Fragment() {
         if (fineGranted || coarseGranted) {
             fetchLiveWeather()
         } else {
-            binding.tvWeatherCondition.text = "Location Permission Needed"
-            binding.tvWeatherDetails.text = "Tap here to grant location for accurate weather"
+            _binding?.let { b ->
+                b.tvWeatherCondition.text = "Location Permission Needed"
+                b.tvWeatherDetails.text = "Tap here to grant location for accurate weather"
+            }
         }
     }
 
@@ -81,6 +85,31 @@ class HomeFragment : Fragment() {
             (activity as? MainActivity)?.selectTab(MainActivity.TAB_SETTINGS)
         }
 
+        binding.btnTopPremiumBadge.setOnClickListener {
+            com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            com.jarvis.assistant.license.LicenseManager.getInstance(requireContext()).currentTier.collect { tier ->
+                _binding?.let { b ->
+                    when (tier.lowercase()) {
+                        "master" -> {
+                            b.tvTopPremiumBadge.text = "VIP MASTER 🌟"
+                            b.tvTopPremiumBadge.setTextColor(Color.parseColor("#F59E0B"))
+                        }
+                        "pro" -> {
+                            b.tvTopPremiumBadge.text = "VIP PRO 👑"
+                            b.tvTopPremiumBadge.setTextColor(Color.parseColor("#C4B5FD"))
+                        }
+                        else -> {
+                            b.tvTopPremiumBadge.text = "KEY 🗝️"
+                            b.tvTopPremiumBadge.setTextColor(Color.parseColor("#FDE68A"))
+                        }
+                    }
+                }
+            }
+        }
+
         binding.btnDismissLiveError.setOnClickListener {
             hideLiveErrorOverlay {
                 viewModel.clearLiveError()
@@ -89,13 +118,35 @@ class HomeFragment : Fragment() {
 
         setupOrbWebView()
 
-        // Action Buttons
+        // Action Buttons with Premium Lock Guard
         binding.btnScreenShareQuick.setOnClickListener {
-            (activity as? MainActivity)?.toggleScreenShare()
+            val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(requireContext())
+            if (licenseManager.isPremiumActive.value) {
+                (activity as? MainActivity)?.toggleScreenShare()
+            } else {
+                android.widget.Toast.makeText(requireContext(), "🔒 Screen Share প্রিমিয়াম ফিচারটি লক করা আছে। অনুগ্রহ করে লাইসেন্স কী দিন।", android.widget.Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
+            }
+        }
+
+        binding.btnWifiRemoteShortcut.setOnClickListener {
+            val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(requireContext())
+            if (licenseManager.isPremiumActive.value) {
+                com.jarvis.assistant.nexus.ui.NexusActivity.start(requireContext())
+            } else {
+                android.widget.Toast.makeText(requireContext(), "🔒 Wi-Fi Remote প্রিমিয়াম ফিচারটি লক করা আছে। অনুগ্রহ করে লাইসেন্স কী দিন।", android.widget.Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
+            }
         }
 
         binding.btnSavedMemories.setOnClickListener {
-            startActivity(Intent(requireContext(), MemoryActivity::class.java))
+            val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(requireContext())
+            if (licenseManager.isPremiumActive.value) {
+                startActivity(Intent(requireContext(), MemoryActivity::class.java))
+            } else {
+                android.widget.Toast.makeText(requireContext(), "🔒 Memory Core প্রিমিয়াম ফিচারটি লক করা আছে। অনুগ্রহ করে লাইসেন্স কী দিন।", android.widget.Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
+            }
         }
 
         binding.btnConversationLanguageQuick.setOnClickListener {
@@ -139,6 +190,9 @@ class HomeFragment : Fragment() {
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
 
+            orbHelper = OrbHelper(this, this@HomeFragment)
+            orbHelper?.setup()
+
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
@@ -158,23 +212,6 @@ class HomeFragment : Fragment() {
                     }
                     setOrbState(state)
                 }
-            }
-
-            // Single tap detection triggers mic/conversation without interrupting 3D rotation drag
-            val gestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
-                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                    (activity as? MainActivity)?.handleMicOrOrbClick()
-                    return true
-                }
-
-                override fun onLongPress(e: MotionEvent) {
-                    (activity as? MainActivity)?.handleHoldMicOrOrb()
-                }
-            })
-
-            setOnTouchListener { v, event ->
-                gestureDetector.onTouchEvent(event)
-                v.onTouchEvent(event)
             }
 
             loadUrl("file:///android_asset/orb.html?embedded=1")
@@ -259,15 +296,14 @@ class HomeFragment : Fragment() {
     }
 
     private fun checkLocationAndFetchWeather() {
-        if (PermissionHelper.hasLocationPermission(requireContext())) {
+        val ctx = context ?: return
+        if (PermissionHelper.hasLocationPermission(ctx)) {
             fetchLiveWeather()
         } else {
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+            _binding?.let { b ->
+                b.tvWeatherCondition.text = "Live Weather"
+                b.tvWeatherDetails.text = "Tap here to grant location for accurate weather"
+            }
         }
     }
 
@@ -609,6 +645,13 @@ class HomeFragment : Fragment() {
         super.onDestroyView()
         _binding = null
     }
+
+    override fun onOrbClicked() {}
+    override fun onMicClicked() { (activity as? MainActivity)?.handleMicOrOrbClick() }
+    override fun onPowerClicked() { (activity as? MainActivity)?.handlePowerClick() }
+    override fun onSettingsClicked() { (activity as? MainActivity)?.selectTab(MainActivity.TAB_SETTINGS) }
+    override fun onHistoryClicked() {}
+    override fun onScreenShareClicked() { (activity as? MainActivity)?.toggleScreenShare() }
 }
 
 private data class HomeStatusState(

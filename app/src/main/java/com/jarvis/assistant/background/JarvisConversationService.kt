@@ -699,7 +699,7 @@ class JarvisConversationService : Service() {
         }
     }
 
-    private fun beginActiveConversation(wakeTriggered: Boolean = false) {
+    private fun beginActiveConversation(wakeTriggered: Boolean = false, overrideModel: String? = null) {
         if (_isSessionOn.value) return
         com.jarvis.assistant.automation.agent.AgentTaskEngine.resetForSession()
         isAutonomousContinuationTurn = false
@@ -791,9 +791,10 @@ class JarvisConversationService : Service() {
 
             withContext(Dispatchers.Main) {
                 if (!_isSessionOn.value) return@withContext
+                val modelToUse = overrideModel ?: preferences.aiModel
                 liveWebSocket = GeminiLiveWebSocket(
                     apiKey = apiKey,
-                    model = preferences.aiModel,
+                    model = modelToUse,
                     voiceName = preferences.voice,
                     systemPrompt = systemPrompt,
                     listener = object : GeminiLiveWebSocket.Listener {
@@ -1252,6 +1253,26 @@ class JarvisConversationService : Service() {
                             updateNotification()
                             serviceScope.launch { _events.emit(message) }
                             when (errorCode) {
+                                "SETUP_REJECTED" -> {
+                                    if (modelToUse.contains("2.0") || modelToUse.contains("2.5")) {
+                                        Log.w("JarvisService", "Gemini 2.0 setup rejected; attempting fallback to 1.5 Flash...")
+                                        serviceScope.launch {
+                                            _events.emit("Optimizing neural connection (fallback to 1.5)...")
+                                            delay(500)
+                                            withContext(Dispatchers.Main) {
+                                                stopActiveConversation()
+                                                beginActiveConversation(overrideModel = com.jarvis.assistant.data.model.GeminiConstants.MODEL_1_5_FLASH)
+                                            }
+                                        }
+                                    } else {
+                                        _liveError.value = JarvisLiveError(
+                                            title = "SETUP REJECTED",
+                                            message = "The Gemini model setup was rejected by the server: $message",
+                                            errorCode = "SETUP_REJECTED",
+                                            actionText = "RETRY"
+                                        )
+                                    }
+                                }
                                 "API_KEY_INVALID" -> {
                                     _liveError.value = JarvisLiveError(
                                         title = "API KEY INVALID",
@@ -2298,6 +2319,53 @@ class JarvisConversationService : Service() {
                         result.put("message", "Screen inspected successfully.")
                     }
 
+                    "save_note", "write_note", "create_note" -> {
+                        val noteTitle = args.optString("title", args.optString("topic", "Note"))
+                        val noteContent = args.optString("content", args.optString("text", args.optString("note", "")))
+                        if (noteContent.isNotBlank()) {
+                            val saved = com.jarvis.assistant.knowledge.KnowledgeVaultManager.addItem(
+                                context = this@JarvisConversationService,
+                                title = if (noteTitle.isBlank()) "Note ${System.currentTimeMillis()}" else noteTitle,
+                                content = noteContent,
+                                category = "Note",
+                                sourceName = "JARVIS Voice Note"
+                            )
+                            result.put("success", true)
+                            result.put("message", "Note saved successfully: '${saved.title}'")
+                        } else {
+                            result.put("success", false)
+                            result.put("message", "Note content was empty.")
+                        }
+                    }
+
+                    "copy_to_clipboard", "copy_text" -> {
+                        val textToCopy = args.optString("text", args.optString("content", ""))
+                        if (textToCopy.isNotBlank()) {
+                            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("JARVIS", textToCopy)
+                            cm?.setPrimaryClip(clip)
+                            result.put("success", true)
+                            result.put("message", "Copied text to system clipboard.")
+                        } else {
+                            result.put("success", false)
+                            result.put("message", "Text to copy was empty.")
+                        }
+                    }
+
+                    "paste_from_clipboard", "paste_text", "get_clipboard" -> {
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        val clipText = cm?.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+                        if (clipText.isNotBlank()) {
+                            val pastedOnScreen = com.jarvis.assistant.automation.accessibility.JarvisAccessibilityService.performPasteOnFocusedNode()
+                            result.put("success", true)
+                            result.put("clipboard_text", clipText)
+                            result.put("pasted_on_screen", pastedOnScreen)
+                            result.put("message", if (pastedOnScreen) "Pasted clipboard text onto screen element." else "Read clipboard text: '$clipText'")
+                        } else {
+                            result.put("success", false)
+                            result.put("message", "System clipboard is empty.")
+                        }
+                    }
 
                     else -> {
                         Log.w("JarvisService", "Unknown toolCall name: $name")

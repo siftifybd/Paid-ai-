@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -25,6 +26,7 @@ import com.jarvis.assistant.databinding.ActivityMainBinding
 import com.jarvis.assistant.ui.chat.ChatFragment
 import com.jarvis.assistant.ui.settings.SettingsFragment
 import com.jarvis.assistant.util.PermissionHelper
+import com.jarvis.assistant.data.auth.DeviceAuthManager
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,6 +38,7 @@ class MainActivity : AppCompatActivity() {
         const val TAB_CHAT = 1
         const val TAB_SETTINGS = 2
         const val TAB_UPDATES = 3
+        private var hasShownLaunchLicenseGate = false
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -154,46 +157,80 @@ class MainActivity : AppCompatActivity() {
 
         currentTab = savedInstanceState?.getInt("CURRENT_TAB", TAB_HOME) ?: TAB_HOME
 
-        // Clear any old restored fragments to prevent ghost overlapping
-        val existingFragments = supportFragmentManager.fragments
-        if (existingFragments.isNotEmpty()) {
-            val trans = supportFragmentManager.beginTransaction()
-            for (fragment in existingFragments) {
-                trans.remove(fragment)
-            }
-            trans.commitNowAllowingStateLoss()
-        }
+        val fm = supportFragmentManager
+        val existingHome = fm.findFragmentByTag("TAB_0") as? HomeFragment
+        val existingChat = fm.findFragmentByTag("TAB_1") as? ChatFragment
+        val existingSettings = fm.findFragmentByTag("TAB_2") as? SettingsFragment
+        val existingUpdates = fm.findFragmentByTag("TAB_3") as? UpdatesFragment
 
-        // Add all 4 fragments fresh into container
-        val trans = supportFragmentManager.beginTransaction()
-            .add(R.id.fragmentContainer, homeFragment, "TAB_0")
-            .add(R.id.fragmentContainer, chatFragment, "TAB_1")
-            .add(R.id.fragmentContainer, settingsFragment, "TAB_2")
-            .add(R.id.fragmentContainer, updatesFragment, "TAB_3")
+        val activeHome = existingHome ?: homeFragment
+        val activeChat = existingChat ?: chatFragment
+        val activeSettings = existingSettings ?: settingsFragment
+        val activeUpdates = existingUpdates ?: updatesFragment
 
         val allTabs = listOf(
-            TAB_HOME to homeFragment,
-            TAB_CHAT to chatFragment,
-            TAB_SETTINGS to settingsFragment,
-            TAB_UPDATES to updatesFragment
+            TAB_HOME to activeHome,
+            TAB_CHAT to activeChat,
+            TAB_SETTINGS to activeSettings,
+            TAB_UPDATES to activeUpdates
         )
 
+        val trans = fm.beginTransaction()
         allTabs.forEach { (tabId, frag) ->
+            if (!frag.isAdded) {
+                trans.add(R.id.fragmentContainer, frag, "TAB_$tabId")
+            }
             if (tabId == currentTab) {
                 trans.show(frag)
             } else {
                 trans.hide(frag)
             }
         }
-        trans.commitNow()
+        trans.commitAllowingStateLoss()
 
         setupNavigationDock()
         setupDrawerNavigation()
-        selectTab(currentTab)
+        updateDockUI(currentTab)
         observeViewModel()
         handleShareIntent(intent)
+
+        val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(this)
+        val deviceAuthManager = DeviceAuthManager.getInstance(this)
+        
+        setupDeviceLockState(licenseManager, deviceAuthManager)
+
+        // Silent authentication on startup
+        lifecycleScope.launch {
+            deviceAuthManager.authenticateDevice()
+        }
+
+        // Global Block/Maintenance Status Monitoring
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                licenseManager.isUserBlocked.collect { isBlocked ->
+                    if (isBlocked) {
+                        com.jarvis.assistant.license.ui.BlockedActivity.start(this@MainActivity)
+                    }
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                licenseManager.isMaintenanceActive.collect { isMaintenance ->
+                    if (isMaintenance) {
+                        com.jarvis.assistant.license.ui.MaintenanceActivity.start(this@MainActivity)
+                    }
+                }
+            }
+        }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (!licenseManager.isDeviceActiveInFirestore.value) {
+                    finish()
+                    return
+                }
                 if (binding.drawerLayout.isDrawerOpen(androidx.core.view.GravityCompat.START)) {
                     closeDrawer()
                 } else if (currentTab != TAB_HOME) {
@@ -205,6 +242,25 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private var lastUpdateCheck = 0L
+
+
+    private fun checkAppUpdateFrequency() {
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheck > 6 * 3600 * 1000L) { // 6 hours
+            lastUpdateCheck = now
+            lifecycleScope.launch {
+                val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(this@MainActivity)
+                val update = licenseManager.checkAppUpdate()
+                if (update != null && update.isActive && update.versionCode > com.jarvis.assistant.BuildConfig.VERSION_CODE) {
+                    if (update.forceUpdate) {
+                        com.jarvis.assistant.license.ui.SystemUpdateActivity.start(this@MainActivity)
+                    }
+                }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -247,66 +303,177 @@ class MainActivity : AppCompatActivity() {
         binding.drawerMenu.btnCloseDrawer.setOnClickListener { closeDrawer() }
         binding.drawerMenu.tvDrawerCloseAction.setOnClickListener { closeDrawer() }
 
-        binding.drawerMenu.navDrawer500FeatureHub.setOnClickListener {
+        binding.drawerMenu.navDrawerNexus.setOnClickListener {
+            openLockedFeatureOrLicense("JARVIS NEXUS (Wi-Fi Remote)") {
+                com.jarvis.assistant.nexus.ui.NexusActivity.start(this)
+            }
+        }
+
+        binding.drawerMenu.navDrawerRemoteControl.setOnClickListener {
+            openLockedFeatureOrLicense("Remote Control (PIN + TLS)") {
+                com.jarvis.assistant.remote.RemoteControlActivity.start(this)
+            }
+        }
+
+        binding.drawerMenu.navDrawerLicense.setOnClickListener {
             closeDrawer()
-            com.jarvis.assistant.features.FeatureHubActivity.start(this)
+            com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+        }
+
+        lifecycleScope.launch {
+            com.jarvis.assistant.license.LicenseManager.getInstance(this@MainActivity).currentTier.collect { tier ->
+                when (tier.lowercase()) {
+                    "master" -> {
+                        binding.drawerMenu.tvDrawerLicenseTier.text = "Active Plan: MASTER 🌟"
+                        binding.drawerMenu.tvDrawerLicenseTier.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
+                    }
+                    "pro" -> {
+                        binding.drawerMenu.tvDrawerLicenseTier.text = "Active Plan: PRO 👑"
+                        binding.drawerMenu.tvDrawerLicenseTier.setTextColor(android.graphics.Color.parseColor("#C4B5FD"))
+                    }
+                    else -> {
+                        binding.drawerMenu.tvDrawerLicenseTier.text = "Activate Key • Unlock Pro & Master"
+                        binding.drawerMenu.tvDrawerLicenseTier.setTextColor(android.graphics.Color.parseColor("#FDE68A"))
+                    }
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            val licenseMgr = com.jarvis.assistant.license.LicenseManager.getInstance(this@MainActivity)
+            licenseMgr.isPremiumActive.collect { isPrem ->
+                updateDrawerLockVisuals(isPrem)
+            }
+        }
+
+        lifecycleScope.launch {
+            val licenseMgr = com.jarvis.assistant.license.LicenseManager.getInstance(this@MainActivity)
+            licenseMgr.isMaintenanceActive.collect { isMaint ->
+                if (isMaint) {
+                    com.jarvis.assistant.license.ui.MaintenanceActivity.start(this@MainActivity)
+                }
+            }
+        }
+
+        binding.drawerMenu.navDrawerSystemUpdates.setOnClickListener {
+            closeDrawer()
+            com.jarvis.assistant.license.ui.SystemUpdateActivity.start(this)
+        }
+
+        binding.drawerMenu.navDrawer500FeatureHub.setOnClickListener {
+            openLockedFeatureOrLicense("500+ Feature Hub & Directory") {
+                com.jarvis.assistant.features.FeatureHubActivity.start(this)
+            }
         }
 
         binding.drawerMenu.navDrawerBanglaPack.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.settings.LanguagePackActivity::class.java))
+            openLockedFeatureOrLicense("Bangla & Banglish Voice") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.settings.LanguagePackActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerTaskReceipts.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.audit.TaskReceiptActivity::class.java))
+            openLockedFeatureOrLicense("Proof of Action / Receipts") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.audit.TaskReceiptActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerWorkflows.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.workflow.WorkflowStudioActivity::class.java))
+            openLockedFeatureOrLicense("Workflow Recorder & Replay") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.workflow.WorkflowStudioActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerKnowledgeVault.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.knowledge.KnowledgeVaultActivity::class.java))
+            openLockedFeatureOrLicense("Offline Knowledge Vault") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.knowledge.KnowledgeVaultActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerNotificationDigest.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.notifications.NotificationDigestActivity::class.java))
+            openLockedFeatureOrLicense("Notification Digest") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.notifications.NotificationDigestActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerContextProfiles.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.settings.ProfileSelectionActivity::class.java))
+            openLockedFeatureOrLicense("Smart Context & Profiles") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.settings.ProfileSelectionActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerDiagnostics.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.diagnostics.DiagnosticsActivity::class.java))
+            openLockedFeatureOrLicense("Device Health & Diagnostics") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.diagnostics.DiagnosticsActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerCameraCopilot.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.vision.CameraCopilotActivity::class.java))
+            openLockedFeatureOrLicense("AR & Camera Copilot") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.vision.CameraCopilotActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerPhoneLock.setOnClickListener {
-            closeDrawer()
-            com.jarvis.assistant.security.DeviceAdminPermissionHelper.openSetupFlow(this)
+            openLockedFeatureOrLicense("Phone Lock & Unlock Tool") {
+                com.jarvis.assistant.security.DeviceAdminPermissionHelper.openSetupFlow(this)
+            }
         }
 
         updateDrawerLockStatus()
 
         binding.drawerMenu.navDrawerMemoryCore.setOnClickListener {
-            closeDrawer()
-            startActivity(Intent(this, com.jarvis.assistant.ui.memory.MemoryActivity::class.java))
+            openLockedFeatureOrLicense("Memory Core") {
+                startActivity(Intent(this, com.jarvis.assistant.ui.memory.MemoryActivity::class.java))
+            }
         }
 
         binding.drawerMenu.navDrawerSettings.setOnClickListener {
             closeDrawer()
             selectTab(TAB_SETTINGS)
+        }
+    }
+
+    private fun openLockedFeatureOrLicense(featureName: String, action: () -> Unit) {
+        val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(this)
+        if (licenseManager.isPremiumActive.value) {
+            closeDrawer()
+            action()
+        } else {
+            closeDrawer()
+            Toast.makeText(
+                this,
+                "🔒 '$featureName' প্রিমিয়াম ফিচারটি লক করা আছে। সম্পূর্ণ অ্যাক্সেস পেতে লাইসেন্স কী দিন।",
+                Toast.LENGTH_LONG
+            ).show()
+            com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+        }
+    }
+
+    private fun updateDrawerLockVisuals(isPremium: Boolean) {
+        val iconRes = if (isPremium) R.drawable.ic_arrow_right else R.drawable.ic_settings_lock
+        val tintColor = if (isPremium) android.graphics.Color.parseColor("#34D399") else android.graphics.Color.parseColor("#F59E0B")
+        val csl = ColorStateList.valueOf(tintColor)
+
+        val lockViews = listOf(
+            binding.drawerMenu.ivLockNexus,
+            binding.drawerMenu.ivLockRemoteControl,
+            binding.drawerMenu.ivLock500FeatureHub,
+            binding.drawerMenu.ivLockBanglaPack,
+            binding.drawerMenu.ivLockTaskReceipts,
+            binding.drawerMenu.ivLockWorkflows,
+            binding.drawerMenu.ivLockKnowledgeVault,
+            binding.drawerMenu.ivLockNotificationDigest,
+            binding.drawerMenu.ivLockContextProfiles,
+            binding.drawerMenu.ivLockDiagnostics,
+            binding.drawerMenu.ivLockCameraCopilot,
+            binding.drawerMenu.ivLockPhoneLock,
+            binding.drawerMenu.ivLockMemoryCore
+        )
+
+        lockViews.forEach { iv ->
+            iv.setImageResource(iconRes)
+            iv.imageTintList = csl
         }
     }
 
@@ -317,6 +484,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        checkAppUpdateFrequency()
+        val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(this)
+        lifecycleScope.launch {
+            val isActive = licenseManager.checkDeviceActiveInFirestore()
+            applyDeviceLock(isActive)
+        }
         viewModel.refreshSettings()
         updateDrawerLockStatus()
         val prefs = com.jarvis.assistant.JarvisApp.instance.preferences
@@ -325,6 +498,77 @@ class MainActivity : AppCompatActivity() {
             appliedCustomHex = prefs.customThemeColor
             recreate()
         }
+    }
+
+    private fun setupDeviceLockState(
+        licenseManager: com.jarvis.assistant.license.LicenseManager,
+        deviceAuthManager: DeviceAuthManager
+    ) {
+        binding.tvLockDeviceId.text = licenseManager.deviceId
+
+        binding.btnOpenLicenseFromLock.setOnClickListener {
+            com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+        }
+
+        binding.btnContactAdminFromLock.setOnClickListener {
+            val devDetails = "Device ID: ${licenseManager.deviceId}\nBrand: ${Build.BRAND}\nModel: ${Build.MODEL}\nOS: Android ${Build.VERSION.RELEASE}\nSDK: ${Build.VERSION.SDK_INT}"
+            val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("JARVIS Device ID", devDetails))
+            Toast.makeText(this, "Device ID copied! Contacting admin...", Toast.LENGTH_SHORT).show()
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://jarvis-nexus.web.app")))
+            } catch (e: Exception) {
+                Toast.makeText(this, "Device ID copied to clipboard.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 1. Initial lock evaluation from cache or immediate state
+        applyDeviceLock(licenseManager.isDeviceActiveInFirestore.value || deviceAuthManager.isAuthorized.value)
+
+        // 2. Refresh from Firestore on startup
+        lifecycleScope.launch {
+            val isActive = licenseManager.checkDeviceActiveInFirestore()
+            val isAuthorized = deviceAuthManager.isAuthorized.value
+            applyDeviceLock(isActive || isAuthorized)
+        }
+
+        // 3. Observe changes in authorization (silent auth result)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    licenseManager.isDeviceActiveInFirestore,
+                    deviceAuthManager.isAuthorized
+                ) { active, authorized -> active || authorized }.collect { isUnlocked ->
+                    applyDeviceLock(isUnlocked)
+                    if (isUnlocked && deviceAuthManager.isPremium.value) {
+                        Log.i("MainActivity", "Premium features unlocked via DeviceAuthManager.")
+                    }
+                }
+            }
+        }
+
+        // 4. Observe device cloud status string in real-time
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                licenseManager.deviceCloudStatus.collect { status ->
+                    val statusText = status.uppercase()
+                    if (licenseManager.isDeviceActiveInFirestore.value) {
+                        binding.tvLockCloudStatus.text = "Cloud Status: $statusText • ACTIVE"
+                        binding.tvLockCloudStatus.setTextColor(android.graphics.Color.parseColor("#10B981"))
+                    } else {
+                        binding.tvLockCloudStatus.text = "Cloud Status: $statusText • Awaiting 'status: active' approval"
+                        binding.tvLockCloudStatus.setTextColor(android.graphics.Color.parseColor("#FDE68A"))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyDeviceLock(isActive: Boolean) {
+        // Keep lock overlay hidden so users can use the app freely, while backend / Firestore device ID telemetry tracks license status
+        binding.layoutDeviceLockOverlay.visibility = View.GONE
+        binding.bottomDock.visibility = View.VISIBLE
+        binding.dockCurvedLine.visibility = View.VISIBLE
     }
 
     private fun updateDrawerLockStatus() {
@@ -379,7 +623,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        trans.commitNowAllowingStateLoss()
+        trans.commitAllowingStateLoss()
 
         tabs.forEach { (tabId, frag) ->
             val v = frag.view
@@ -589,5 +833,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+    override fun onDestroy() {
+        com.jarvis.assistant.data.auth.DeviceAuthManager.getInstance(this).stopAuthListener()
+        super.onDestroy()
     }
 }

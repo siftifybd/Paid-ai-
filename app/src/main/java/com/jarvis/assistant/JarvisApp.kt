@@ -30,6 +30,9 @@ class JarvisApp : Application() {
     lateinit var chatRepository: ChatRepository
         private set
 
+    lateinit var firebaseNetworkRepo: com.jarvis.assistant.data.repository.FirebaseNetworkRepo
+        private set
+
     lateinit var memoryDatabase: MemoryDatabase
         private set
 
@@ -60,6 +63,13 @@ class JarvisApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e("JarvisApp", "FATAL UNCAUGHT EXCEPTION on thread ${thread.name}: ${throwable.message}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         preferences = AppPreferences(this)
         chatRepository = ChatRepository(preferences)
 
@@ -84,6 +94,24 @@ class JarvisApp : Application() {
         )
 
         VoskModelManager.init(this, CoroutineScope(Dispatchers.Default))
+        try {
+            com.google.firebase.FirebaseApp.initializeApp(this)
+            android.util.Log.i("JarvisApp", "Firebase initialized successfully")
+            
+            // Enable Firestore persistence
+            val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                .setPersistenceEnabled(true)
+                .setCacheSizeBytes(com.google.firebase.firestore.FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+                .build()
+            firestore.firestoreSettings = settings
+
+            firebaseNetworkRepo = com.jarvis.assistant.data.repository.FirebaseNetworkRepo.getInstance(this)
+            firebaseNetworkRepo.startAutoSync(appScope)
+        } catch (e: Throwable) {
+            android.util.Log.w("JarvisApp", "Firebase initialization skipped: ${e.message}")
+        }
+        com.jarvis.assistant.nexus.manager.NexusManager.init(this)
 
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             private var startedActivities = 0

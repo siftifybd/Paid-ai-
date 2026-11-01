@@ -27,7 +27,7 @@ class YouTubePreferences(context: Context) {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         Log.e(TAG, "EncryptedSharedPreferences initialization failed, falling back to standard prefs: ${e.message}")
         context.getSharedPreferences(FALLBACK_FILE, Context.MODE_PRIVATE)
     }

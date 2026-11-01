@@ -6,7 +6,7 @@
     android:layout_width="320dp"
     android:layout_height="match_parent"
     android:layout_gravity="start"
-    android:background="#0A0204"
+    android:background="#070814"
     android:orientation="vertical"
     android:clickable="true"
     android:focusable="true">
@@ -15,7 +15,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#160306"
+        android:background="#0F1226"
         android:paddingTop="36dp"
         android:paddingBottom="20dp"
         android:paddingHorizontal="20dp"
@@ -53,7 +53,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="CYBERNETIC CORE"
-                    android:textColor="#FF2A4B"
+                    android:textColor="#00F0FF"
                     android:textSize="10sp"
                     android:letterSpacing="0.10"
                     android:textStyle="bold"
@@ -112,7 +112,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#26FF1744" />
+        android:background="#1E293B" />
 
     <!-- Scrollable Drawer Items -->
     <ScrollView
@@ -135,11 +135,218 @@
                 android:layout_marginTop="6dp"
                 android:layout_marginBottom="4dp"
                 android:text="NEW CAPABILITIES"
-                android:textColor="#FF2A4B"
+                android:textColor="#38BDF8"
                 android:textSize="10sp"
                 android:letterSpacing="0.14"
                 android:textStyle="bold"
                 android:fontFamily="monospace" />
+
+            <!-- Item Nexus: JARVIS NEXUS Wi-Fi LAN + Internet Remote Control -->
+            <LinearLayout
+                android:id="@+id/navDrawerNexus"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_nexus_purple_btn"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:layout_marginBottom="6dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_nexus_wifi"
+                    app:tint="#FFFFFF"
+                    android:contentDescription="Nexus Wi-Fi Remote" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="JARVIS NEXUS (Wi-Fi Remote)"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Wi-Fi LAN + Internet Remote Control"
+                        android:textColor="#C4B5FD"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:id="@+id/ivLockNexus"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
+            </LinearLayout>
+
+            <!-- Item Remote Control: secure LAN + Internet remote touch control -->
+            <LinearLayout
+                android:id="@+id/navDrawerRemoteControl"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_nexus_purple_btn"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:layout_marginBottom="6dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_nexus_wifi"
+                    app:tint="#FFFFFF"
+                    android:contentDescription="Remote Control" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Remote Control (PIN + TLS)"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="LAN + Internet touch control"
+                        android:textColor="#C4B5FD"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:id="@+id/ivLockRemoteControl"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
+            </LinearLayout>
+
+            <!-- Item Premium & License: Activation & Subscription -->
+            <LinearLayout
+                android:id="@+id/navDrawerLicense"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_nexus_purple_btn"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:layout_marginBottom="6dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_settings_shield"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Premium License" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Premium &amp; License"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvDrawerLicenseTier"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Activate Key • Unlock Pro &amp; Master"
+                        android:textColor="#FDE68A"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="#FFFFFF"
+                    android:contentDescription="Arrow" />
+            </LinearLayout>
+
+            <!-- Item System Updates: OTA Distribution -->
+            <LinearLayout
+                android:id="@+id/navDrawerSystemUpdates"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_jarvis_row_item"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:layout_marginBottom="6dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_sparkle"
+                    app:tint="#60A5FA"
+                    android:contentDescription="System Updates" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="System Updates"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Check for OTA APK updates"
+                        android:textColor="#93C5FD"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="#FFFFFF"
+                    android:contentDescription="Arrow" />
+            </LinearLayout>
 
             <!-- Item 0: 500+ Feature Hub & Directory -->
             <LinearLayout
@@ -185,11 +392,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLock500FeatureHub"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#00E5FF"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 1: Bangla & Banglish Pack -->
@@ -236,11 +444,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockBanglaPack"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 2: Proof of Action / Task Receipts -->
@@ -287,11 +496,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockTaskReceipts"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 3: Workflow Recorder & Replay -->
@@ -338,11 +548,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockWorkflows"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 4: Offline Knowledge Vault -->
@@ -389,11 +600,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockKnowledgeVault"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 5: Notification Digest -->
@@ -440,11 +652,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockNotificationDigest"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 6: Smart Context & Profiles -->
@@ -491,11 +704,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockContextProfiles"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 7: Device Health & Diagnostics -->
@@ -542,11 +756,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockDiagnostics"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 8: AR & Camera Copilot -->
@@ -593,11 +808,12 @@
                 </LinearLayout>
 
                 <ImageView
+                    android:id="@+id/ivLockCameraCopilot"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 8b: Phone Lock & Unlock Tool -->
@@ -657,11 +873,12 @@
                     android:textStyle="bold" />
 
                 <ImageView
+                    android:id="@+id/ivLockPhoneLock"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <TextView
@@ -707,11 +924,12 @@
                     android:textSize="13sp" />
 
                 <ImageView
+                    android:id="@+id/ivLockMemoryCore"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="#A0A0A0"
-                    android:contentDescription="Arrow" />
+                    android:src="@drawable/ic_settings_lock"
+                    app:tint="#F59E0B"
+                    android:contentDescription="Lock Status" />
             </LinearLayout>
 
             <!-- Item 10: Jarvis Settings -->

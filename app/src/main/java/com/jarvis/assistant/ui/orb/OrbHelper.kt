@@ -63,6 +63,7 @@ class OrbHelper(
 
             @JavascriptInterface
             fun onMicClicked() {
+                android.util.Log.d("OrbHelper", "onMicClicked triggered from WebView")
                 webView.post { listener?.onMicClicked() }
             }
 

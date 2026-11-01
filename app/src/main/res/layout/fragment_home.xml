@@ -86,6 +86,43 @@
             android:layout_marginTop="2dp" />
     </LinearLayout>
 
+    <!-- Top Premium & License Badge Button -->
+    <LinearLayout
+        android:id="@+id/btnTopPremiumBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_vip_premium_pill"
+        android:paddingHorizontal="12dp"
+        android:layout_marginEnd="8dp"
+        android:elevation="4dp"
+        android:clickable="true"
+        android:focusable="true"
+        app:layout_constraintTop_toTopOf="@id/btnTopSettings"
+        app:layout_constraintBottom_toBottomOf="@id/btnTopSettings"
+        app:layout_constraintEnd_toStartOf="@id/btnTopSettings">
+
+        <ImageView
+            android:id="@+id/ivTopPremiumIcon"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_settings_shield"
+            app:tint="#F59E0B"
+            android:contentDescription="Premium Shield" />
+
+        <TextView
+            android:id="@+id/tvTopPremiumBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="KEY 🗝️"
+            android:textColor="#FDE68A"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:layout_marginStart="6dp" />
+    </LinearLayout>
+
     <ImageButton
         android:id="@+id/btnTopSettings"
         android:layout_width="46dp"
@@ -125,6 +162,44 @@
             android:layout_gravity="center"
             android:background="@android:color/transparent" />
     </FrameLayout>
+
+    <!-- Wi-Fi Remote Shortcut Button (Step 1 of Flow) -->
+    <LinearLayout
+        android:id="@+id/btnWifiRemoteShortcut"
+        android:layout_width="66dp"
+        android:layout_height="66dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="6dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:background="@drawable/bg_nexus_purple_btn"
+        android:elevation="8dp"
+        android:layout_marginEnd="4dp"
+        app:layout_constraintTop_toTopOf="@id/orbContainer"
+        app:layout_constraintBottom_toBottomOf="@id/orbContainer"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:src="@drawable/ic_nexus_wifi"
+            app:tint="#FFFFFF"
+            android:contentDescription="Wi-Fi Remote" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wi-Fi\nRemote"
+            android:textAlignment="center"
+            android:textColor="#FFFFFF"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="0dp"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
 
     <!-- Sleek Futuristic Status Pill -->
     <LinearLayout

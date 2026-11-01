@@ -40,6 +40,7 @@ class PermissionActivity : AppCompatActivity() {
     private val allPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { updatePermissionStates() }
+    private val multiplePermissionsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { updatePermissionStates() }
     private val contactsLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updatePermissionStates() }
     private val callLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updatePermissionStates() }
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updatePermissionStates() }
@@ -122,12 +123,13 @@ class PermissionActivity : AppCompatActivity() {
         updateCardState(hasNotif, binding.tvStatusNotification, binding.btnGrantNotification)
         updateCardState(hasOverlay, binding.tvStatusOverlay, binding.btnGrantOverlay)
         updateCardState(hasA11y, binding.tvStatusAccessibility, binding.btnGrantAccessibility)
-        updateExtraPermission("contacts", PermissionHelper.hasContactsPermission(this))
-        updateExtraPermission("phone", hasPermission(Manifest.permission.CALL_PHONE))
+        updateExtraPermission("contacts", com.jarvis.assistant.util.PermissionHandler.hasContactsPermission(this))
+        updateExtraPermission("phone", com.jarvis.assistant.util.PermissionHandler.hasPhoneCallPermission(this))
+        updateExtraPermission("sms", com.jarvis.assistant.util.PermissionHandler.hasSmsPermission(this))
         updateExtraPermission("camera", hasPermission(Manifest.permission.CAMERA))
         updateExtraPermission("bluetooth", Build.VERSION.SDK_INT < Build.VERSION_CODES.S || hasPermission(Manifest.permission.BLUETOOTH_CONNECT))
         updateExtraPermission("battery", PermissionHelper.hasBatteryOptimizationPermission(this))
-        updateExtraPermission("brightness", PermissionHelper.hasWriteSettingsPermission(this))
+        updateExtraPermission("brightness", com.jarvis.assistant.util.PermissionHandler.hasModifySettingsPermission(this))
 
         if (hasMic && hasLoc && hasNotif && hasA11y) {
             binding.btnGrantAll.text = "ALL ESSENTIAL PERMISSIONS GRANTED ✓"
@@ -227,11 +229,32 @@ class PermissionActivity : AppCompatActivity() {
             extraStatus[key] = status
             extraButtons[key] = button
         }
-        card("contacts", "Contacts", "Lets WhatsApp and calling features resolve saved contact names.", com.jarvis.assistant.R.drawable.ic_nav_chat) {
-            if (!PermissionHelper.hasContactsPermission(this)) contactsLauncher.launch(Manifest.permission.READ_CONTACTS) else PermissionHelper.openAppSettings(this)
+        card("contacts", "Contacts", "Lets JARVIS and messaging features resolve saved contact names.", com.jarvis.assistant.R.drawable.ic_nav_chat) {
+            com.jarvis.assistant.util.PermissionHandler.checkAndRequestPermissions(
+                this,
+                com.jarvis.assistant.util.PermissionHandler.PermissionCategory.CONTACTS,
+                multiplePermissionsLauncher
+            ) {
+                com.jarvis.assistant.util.PermissionHandler.openAppSettings(this)
+            }
         }
-        card("phone", "Phone calls", "Needed only when you ask JARVIS to place a normal phone call.", com.jarvis.assistant.R.drawable.ic_settings_voice) {
-            if (!hasPermission(Manifest.permission.CALL_PHONE)) callLauncher.launch(Manifest.permission.CALL_PHONE) else PermissionHelper.openAppSettings(this)
+        card("phone", "Phone calls", "Needed when you ask JARVIS to place a phone call.", com.jarvis.assistant.R.drawable.ic_settings_voice) {
+            com.jarvis.assistant.util.PermissionHandler.checkAndRequestPermissions(
+                this,
+                com.jarvis.assistant.util.PermissionHandler.PermissionCategory.PHONE_CALLS,
+                multiplePermissionsLauncher
+            ) {
+                com.jarvis.assistant.util.PermissionHandler.openAppSettings(this)
+            }
+        }
+        card("sms", "SMS Messaging", "Allows JARVIS to send and read text messages when requested.", com.jarvis.assistant.R.drawable.ic_nav_chat) {
+            com.jarvis.assistant.util.PermissionHandler.checkAndRequestPermissions(
+                this,
+                com.jarvis.assistant.util.PermissionHandler.PermissionCategory.SMS,
+                multiplePermissionsLauncher
+            ) {
+                com.jarvis.assistant.util.PermissionHandler.openAppSettings(this)
+            }
         }
         card("camera", "Camera and flashlight", "Camera access is used only for the flashlight control.", com.jarvis.assistant.R.drawable.ic_settings_orb) {
             if (!hasPermission(Manifest.permission.CAMERA)) cameraLauncher.launch(Manifest.permission.CAMERA) else PermissionHelper.openAppSettings(this)
@@ -239,11 +262,17 @@ class PermissionActivity : AppCompatActivity() {
         card("bluetooth", "Nearby Bluetooth devices", "Optional: allows JARVIS to detect and route audio to a connected headset.", com.jarvis.assistant.R.drawable.ic_settings_plug) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) bluetoothLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) else PermissionHelper.openAppSettings(this)
         }
-        card("battery", "Background battery access", "Recommended on Vivo devices so voice service and overlay can stay active in the background.", com.jarvis.assistant.R.drawable.ic_settings_silent) {
+        card("battery", "Background battery access", "Recommended so voice service and overlay can stay active in the background.", com.jarvis.assistant.R.drawable.ic_settings_silent) {
             PermissionHelper.requestBatteryOptimization(this)
         }
         card("brightness", "Modify system settings", "Optional: lets JARVIS adjust screen brightness when you ask.", com.jarvis.assistant.R.drawable.ic_settings_palette) {
-            PermissionHelper.requestWriteSettings(this)
+            com.jarvis.assistant.util.PermissionHandler.checkAndRequestPermissions(
+                this,
+                com.jarvis.assistant.util.PermissionHandler.PermissionCategory.MODIFY_SETTINGS,
+                multiplePermissionsLauncher
+            ) {
+                com.jarvis.assistant.util.PermissionHandler.requestModifySettings(this)
+            }
         }
         val note = TextView(this).apply {
             text = "Screen sharing uses Android’s one-time screen-capture confirmation when you start sharing. Internet, network, notifications, and foreground-service access are managed by Android."

@@ -20,3 +20,18 @@
 -keep class androidx.room.** { *; }
 -keep class * extends androidx.room.RoomDatabase
 -keep class com.jarvis.assistant.data.memory.** { *; }
+
+# Remote control (Gson models + Java-WebSocket)
+-keep class com.jarvis.assistant.remote.** { *; }
+-keep class org.java_websocket.** { *; }
+-dontwarn org.slf4j.**
+
+# License & Entitlement models
+-keep class com.jarvis.assistant.license.model.** { *; }
+
+# Nexus models & Firebase PropertyName keep rules (H2)
+-keep class com.jarvis.assistant.nexus.model.** { *; }
+-keep class com.jarvis.assistant.nexus.data.** { *; }
+-keep class com.jarvis.assistant.data.repository.NetworkRemoteCommand { *; }
+-keep class com.jarvis.assistant.data.repository.DeviceNetworkStatus { *; }
+-keepclassmembers class * { @com.google.firebase.firestore.PropertyName <fields>; }

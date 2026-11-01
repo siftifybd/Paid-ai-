@@ -79,6 +79,26 @@ class JarvisAccessibilityService : AccessibilityService() {
             return null
         }
 
+        fun lockScreen(): Boolean {
+            val inst = instance ?: return false
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                inst.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+            } else {
+                false
+            }
+        }
+
+        fun performPasteOnFocusedNode(): Boolean {
+            val inst = instance ?: return false
+            val focused = inst.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                ?: inst.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null) {
+                return focused.performAction(AccessibilityNodeInfo.ACTION_PASTE) ||
+                        focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_PASTE.id)
+            }
+            return false
+        }
+
         suspend fun captureScreenBitmap(): Bitmap? {
             val s = instance ?: return null
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null

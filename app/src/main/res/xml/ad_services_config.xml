@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ad-services-config>
+    <attestation-consent enabled="false"/>
+    <topics enabled="false"/>
+    <fledge enabled="false"/>
+    <measurement enabled="false"/>
+</ad-services-config>

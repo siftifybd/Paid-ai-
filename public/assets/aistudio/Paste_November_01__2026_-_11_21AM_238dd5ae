@@ -1,0 +1,510 @@
+
+## PART A — Role, context, absolute rules
+
+You are a senior Android (Kotlin), Firebase (Auth/Firestore/Storage/Rules), Node.js and web-security engineer. You will repair an existing project **in place**. Work directly on the supplied files. Do not rewrite from scratch, do not remove working features, do not use mock/demo data, and do not report anything as working unless you ran it or clearly mark it **NOT TESTED**.
+
+**Project**
+- Android app: package `com.jarvis.assistant`, Kotlin, Firebase Auth (anonymous for users), Cloud Firestore. Project ID: `ai--server`.
+- Admin web app: single file `index_ai3.html` (Firebase compat SDK 10.12.2, Firestore + Auth + Storage). Admin logs in with email/password.
+- Optional relay server: `backend/server.js` (Node, `ws`).
+- Plan: assume Firebase **Spark**. Do not enable Blaze/Cloud Functions. Admin Firebase Storage upload may be unavailable on Spark → the update system must also support a **direct download link**.
+
+**Absolute rules**
+1. Inspect the real files first (`grep` every Firestore path/field the Kotlin code reads/writes) — trust code over this document if they differ, then report the difference.
+2. Never put service-account keys, Admin SDK credentials, keystores or passwords in code, Git, `public/` or the zip.
+3. Never weaken Firestore Rules to "make it work". Rules in PART E are the target; change app code to satisfy rules, not the other way round.
+4. All timestamps that the Android app reads from Firestore for licenses/devices/system_config are **Long (epoch ms)**, never Firestore `Timestamp`.
+5. One canonical Device ID: the `devices/{deviceId}` document id = `LicenseManager.deviceId` (`nexus_dev_<16 hex>`). Never use `ANDROID_ID` as a Firestore key.
+6. Do not claim "done" without evidence (build log, test output, or explicit NOT TESTED).
+7. Keep changes small and reviewable; list every changed file.
+
+---
+
+## PART B — Known problems (verified by code reading) and the required fix for each
+
+Severity: 🔴 release-blocking · 🟠 high · 🟡 medium.
+
+| ID | Sev | Problem | Fix (see PART D) |
+|---|---|---|---|
+| C1 | 🔴 | `LicenseManager.activateLicense()` can never succeed with the hardened rules: it writes `users.{tier,activeLicenseKey,licenseExpiresAt}` and `devices.status="active"`, which the old rules forbid; and it uses `transaction.update(users/{uid})` although the app never creates `users/{uid}` (NOT_FOUND for new users). | D1 + new rules (PART E) |
+| C2 | 🔴 | Old rules: `devices` `allow create: if signedIn()` unrestricted → anyone can create a device doc with `status:"active", tier:"master"` and the app treats it as Premium. | PART E |
+| C3 | 🔴 | Old rules: `admins` write=false, no rules for `app_updates`, `app_config`, `plans`, `notification_requests`, `adminAuditLogs`; `isAdmin()` ignores `active`; `admins` readable by any signed-in user. Admin panel cannot work. | PART E |
+| C4 | 🔴 | `sendRemoteCommand()` never sets `sourceUid` (rules require it); receiver skips owner check when `targetOwnerUid == null`. | D3 |
+| C5 | 🔴 | `NexusLocalServer` now uses TLS (`SSLServerSocket`) but `NexusClient` still uses plain `Socket()` at 5 places; server action renamed `fs.list`→`fs.browse` but client still sends `fs.list`. Nexus LAN is broken. | D4 |
+| H1 | 🟠 | Release build is signed with `debugConfig` (`${rootDir}/debug.keystore`, password `android`); file missing from repo → clean build fails; anyone can sign a fake update. | D5 |
+| H2 | 🟠 | `isMinifyEnabled = true` with incomplete keep rules → Gson/Firestore models in `nexus.*` and others can be renamed by R8. | D6 |
+| H3 | 🟠 | New Nexus pairings still get default capabilities `"all,device.status.read,…,accessibility.nav"` (`NexusLocalServer.kt` ~lines 98 and ~304). | D7 |
+| H4 | 🟠 | Relay: `deviceId` is not bound to the public key (TOFU), `fromDeviceId` still comes from `payload.senderDeviceId`, default `RELAY_TOKEN` fallback string, `GET_CHALLENGE` keyed by deviceId (overwritable). | D8 |
+| M1 | 🟡 | `syncDeviceTelemetry()` writes `tier`, `isPremium`, `status`, `activeLicenseKey` from local state each time → can overwrite an admin grant. | D2 |
+| M2 | 🟡 | `activateLicense()` writes `"appVersion" to "1.8.7"` hard-coded. | D1 |
+| M3 | 🟡 | Update download opens the URL in a browser: no SHA-256 / package / signature verification. | D9 (recommended) |
+| M4 | 🟡 | Notification Center, remote flags, `minVersionCode`, lock flags have **no consumer in the app**. | PART G (honest labels already in admin; optional consumer D10) |
+| M5 | 🟡 | Anonymous Auth: reinstall → new UID + new Device ID → license `OWNER_MISMATCH`/`DEVICE_LIMIT`. | Admin "Reset Binding" (already in admin); long-term: link Google/Email |
+
+---
+
+## PART C — Data contract (collections, fields, who reads/writes)
+
+`Long` = epoch milliseconds. "A" = admin panel, "App" = Android app.
+
+### C.1 `licenses/{KEY}` — document id = KEY uppercase, format `NUSRAT-AR-XXXX-XXXX`
+| Field | Type | Written by | Notes |
+|---|---|---|---|
+| `tier` | string `"pro"` \| `"master"` | A | Android: pro/master = Premium (lower-cased by app) |
+| `userId` | string \| null | A (assign) / App (activation) | null → anyone may activate; else only that UID |
+| `userEmail` | string \| null | A | info |
+| `isUsed` | bool | App (activation) / A (reset) | |
+| `revoked` | bool | A | true → activation denied, Premium removed |
+| `durationDays` | number | A | used when `expiresAt == 0` |
+| `expiresAt` | **Long**, `0` = not yet activated | App (first activation) / A (extend) | ⚠ must not be Timestamp |
+| `maxDevices` | number | A | |
+| `boundDevices` | array<string> | App / A | Device IDs |
+| `createdAt`, `lastUsedAt` | **Long** | A / App | ⚠ not Timestamp |
+| `createdBy` | string | A | admin UID |
+
+### C.2 `users/{uid}`
+App writes (only during activation, via `set(..., merge)`): `uid`, `tier`, `activeLicenseKey`, `licenseExpiresAt`(Long), `lastSeenAt`(Long). App **reads only** `status`.
+Admin writes: `status` (`"active"` \| `"blocked"`), plus panel-only `plan`, `premium`, `premiumExpiry`, `licenseExpiresAt`.
+**Nobody except admin may write `status`.** (Doc may not exist before first activation → admin "Users" lists only activated users; use "Devices" for all devices.)
+
+### C.3 `devices/{deviceId}`
+| Field | Written by | Notes |
+|---|---|---|
+| `deviceId, manufacturer, model, brand, osVersion, sdkVersion, lastSeenAt` | App telemetry | |
+| `status`: `pending`→`active`; admin may set `revoked`/`blocked` | App (activation) / A | Premium requires `active` + `tier` ≠ basic + not expired |
+| `tier`, `isPremium`, `expiresAt`(Long), `licenseKey`, `userId` | App at activation (only when backed by a valid license); A | |
+| `statusBeforeBlock` | A | admin unblock restores it |
+
+### C.4 `system_config/maintenance` (public read, admin write)
+`maintenanceEnabled`(bool) `maintenanceTitle` `maintenanceMessage` `startAt`(Long, 0=none) `endAt`(Long) `estimatedEndAt`(Long) `allowAdminBypass`(bool) `updatedAt`(Long)
+
+### C.5 `system_config/app_update` (public read, admin write; written automatically by admin "Publish")
+`versionCode`(Long) `versionName` `downloadUrl`(https) `fileSize`(Long) `checksumSha256`(hex, optional) `releaseNotes` `forceUpdate`(bool) `minSupportedVersionCode`(Long) `publishedAt`(Long) `isActive`(bool) `source`(`"storage"`|`"link"`)
+
+### C.6 Admin-only collections (app never reads)
+- `admins/{uid}`: `active`(bool) `email` `name` `role`(`super_admin`|`admin`) `invited`(bool) `addedBy` `createdAt` `setupDone`
+- `app_updates/{id}` (release records): `source`(`storage`|`link`) `packageName` `versionName` `versionCode` `minSupportedVersion` `releaseNotes` `downloadUrl` `storagePath`(null for link) `fileSize` `sha256` `releaseDate` `createdBy` `published` `force` (+ transient `status:"deleting"|"delete_failed"`)
+- `app_config/global`, `plans/{id}`, `notification_requests/{id}` (**queue only — not delivered**), `adminAuditLogs/{id}` (append-only: `adminUid adminEmail action targetUid targetDeviceId prev next ts`)
+
+### C.7 Remote network control (app ↔ app)
+`network_commands/{cmdId}`: `commandId targetDeviceId sourceDeviceId sourceUid action parameters executed resultMessage executedAt timestamp signature` · `device_network_status/{deviceId}`
+
+---
+
+## PART D — Required code changes (Android + relay)
+
+Paths relative to `app/src/main/java/com/jarvis/assistant/`. Apply, then compile (`./gradlew assembleDebug`, then release).
+
+### D1 — `license/LicenseManager.kt` → `activateLicense()`
+Replace the user and device writes inside the Firestore transaction:
+```kotlin
+// 2. user record — doc may not exist: use set+merge (NOT update). Never write "status".
+transaction.set(
+    userDocRef,
+    mapOf(
+        "uid" to uid,
+        "tier" to normalizedTier,
+        "activeLicenseKey" to cleanKey,
+        "licenseExpiresAt" to calculatedExpiry,
+        "lastSeenAt" to now
+    ),
+    SetOptions.merge()
+)
+// 3. device record — write tier/isPremium/expiresAt too, otherwise the device listener demotes to basic
+transaction.set(
+    deviceDocRef,
+    mapOf(
+        "deviceId" to deviceId,
+        "userId" to uid,
+        "licenseKey" to cleanKey,
+        "tier" to normalizedTier,
+        "isPremium" to true,
+        "expiresAt" to calculatedExpiry,
+        "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}",
+        "appVersion" to com.jarvis.assistant.BuildConfig.VERSION_NAME,
+        "platform" to "android",
+        "status" to "active",
+        "lastSeenAt" to now
+    ),
+    SetOptions.merge()
+)
+```
+Keep the existing blocked-user check (`userSnap.getString("status") == "blocked"` → `Revoked`) and all reads before writes.
+
+### D2 — `license/LicenseManager.kt` → `syncDeviceTelemetry()`
+```kotlin
+val deviceData = hashMapOf<String, Any>(
+    "deviceId" to deviceId, "manufacturer" to Build.MANUFACTURER, "model" to Build.MODEL,
+    "brand" to Build.BRAND, "osVersion" to Build.VERSION.RELEASE,
+    "sdkVersion" to Build.VERSION.SDK_INT, "lastSeenAt" to System.currentTimeMillis()
+)
+if (!snapshot.exists()) { deviceData["status"] = "pending"; deviceData["tier"] = "basic"; deviceData["isPremium"] = false }
+docRef.set(deviceData, SetOptions.merge()).await()
+// Do NOT write tier / isPremium / status / activeLicenseKey here.
+```
+
+### D3 — Remote commands
+`data/repository/FirebaseNetworkRepo.kt` → `sendRemoteCommand()`: get `val me = FirebaseAuth.getInstance().currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))` and pass `sourceUid = me` to `NetworkRemoteCommand(...)`.
+`network/NetworkCommandReceiver.kt`: reject when `command.sourceUid.isNullOrBlank()`; keep HMAC + 60 s TTL; if `command.targetOwnerUid` is non-null it must equal the current UID.
+Fallback if Firestore says "insufficient permissions" on the command listener: add `.whereEqualTo("targetOwnerUid", uid)` to the listener query **and** write `targetOwnerUid` (target device owner) when sending.
+
+### D4 — Nexus client TLS + action name
+`nexus/transport/NexusClient.kt`: replace each plain `Socket()` (≈ lines 44, 124, 165, 227, 297) by a TLS socket created through `remote/RemoteTls` (read that file first; if no client factory exists, pin the server certificate SHA-256 fingerprint stored at pairing time using a custom `X509TrustManager`; **never** trust-all). Change `addProperty("action","fs.list")` (≈ line 172) to `"fs.browse"` (or make the server accept both).
+
+### D5 — Release signing (`app/build.gradle.kts`)
+```kotlin
+val ksProps = java.util.Properties().apply {
+    val f = rootProject.file("keystore.properties"); if (f.exists()) load(f.inputStream())
+}
+android {
+    signingConfigs {
+        create("release") {
+            storeFile = file(ksProps.getProperty("storeFile", "release.jks"))
+            storePassword = ksProps.getProperty("storePassword")
+            keyAlias = ksProps.getProperty("keyAlias")
+            keyPassword = ksProps.getProperty("keyPassword")
+        }
+    }
+    buildTypes { release { signingConfig = signingConfigs.getByName("release") } }
+}
+```
+Remove the `debugConfig` that points to `${rootDir}/debug.keystore`. Add `release.jks`, `keystore.properties`, `*.keystore`, `local.properties` to `.gitignore`. The agent must **not** generate or commit a keystore into the project; instruct the owner to run `keytool -genkeypair -v -keystore release.jks -alias jarvis -keyalg RSA -keysize 2048 -validity 10000` and back it up.
+
+### D6 — `app/proguard-rules.pro` (append)
+```
+-keep class com.jarvis.assistant.nexus.model.** { *; }
+-keep class com.jarvis.assistant.nexus.data.** { *; }
+-keep class com.jarvis.assistant.data.repository.NetworkRemoteCommand { *; }
+-keep class com.jarvis.assistant.data.repository.DeviceNetworkStatus { *; }
+-keepclassmembers class * { @com.google.firebase.firestore.PropertyName <fields>; }
+```
+Then build `assembleRelease` and fix any R8 warnings; the release APK must be installed and tested (PART I).
+
+### D7 — Nexus default capabilities (`nexus/transport/NexusLocalServer.kt`)
+Both default strings (≈ lines 98 and 304) → `"device.status.read,jarvis.chat.send_prompt,media.control"`. Remove `"all"` and the sensitive ones (`fs.browse`, `gallery.browse`, `dialer.call`, `screen.share.request`, `camera.preview.request`, `accessibility.nav`, `file.receive.accept`) from defaults; they must be granted explicitly by the device owner.
+
+### D8 — Relay `backend/server.js`
+```js
+const SERVER_RELAY_TOKEN = process.env.RELAY_TOKEN;
+if (!SERVER_RELAY_TOKEN) { console.error('RELAY_TOKEN env var is required'); process.exit(1); }
+
+// challenge bound to the socket, not to a deviceId
+case 'GET_CHALLENGE': { ws.challenge = { value: crypto.randomBytes(32).toString('hex'), ts: Date.now() };
+  return safeSend(ws, { type: 'AUTH_CHALLENGE', payload: { challenge: ws.challenge.value } }); }
+
+// in REGISTER_DEVICE after the signature verifies:
+const prev = knownKeys.get(deviceId);                  // const knownKeys = new Map(); persist to disk/DB in production
+if (prev && prev !== publicKey) return safeSend(ws, { type: 'ERROR', message: 'Key mismatch for deviceId' });
+knownKeys.set(deviceId, publicKey);
+ws.authDeviceId = deviceId;
+
+// in every forwarding case:
+if (!ws.authDeviceId) return safeSend(ws, { type: 'ERROR', message: 'Not registered' });
+// ... fromDeviceId: ws.authDeviceId     (NEVER payload.senderDeviceId)
+```
+Also: serve only behind TLS (Nginx/Caddy `wss://`), remove counts from `/health`, keep rate-limit and 32 KB limit. Document `RELAY_TOKEN=<long random> node server.js`. Update the Android `RelayClient` accordingly (it must send the same token via `store.relayToken`).
+
+### D9 — Update downloader (recommended, M3)
+Manifest: `REQUEST_INSTALL_PACKAGES` + `FileProvider`. Download the APK with OkHttp to `cacheDir`, verify SHA-256 against `checksumSha256` (skip only if blank), verify `packageArchiveInfo.packageName == packageName` and signing certificate equals the installed app's, then install through `FileProvider` + `ACTION_VIEW`. Allow only `https` URLs. Keep the current browser fallback when the file cannot be verified. Works for both Storage URLs and direct links.
+
+### D10 — Optional consumers (only if the owner wants them)
+Notifications: Firestore listener on a `notifications` collection (audience filter) shown in-app. Feature flags/`minSupportedVersionCode`: read `system_config/app_update.minSupportedVersionCode` and force the update screen when `BuildConfig.VERSION_CODE < min`. Until implemented, admin labels them "queued / not enforced" (already done).
+
+---
+
+## PART E — Firestore Rules (deploy exactly this) and Storage Rules
+
+### E.1 `firestore.rules`
+```
+// JARVIS NEXUS — FINAL Firestore Rules (for ai--serverv2 app + index_ai3.html admin)
+// STATUS: written by reading the code; NOT run in the Firebase Emulator. Test before deploying (see ADMIN_APP_FINAL_GUIDE.md §6).
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Single source of truth for admins: admins/{uid}.active == true  (first admin is created by hand in Console)
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(db)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(db)/documents/admins/$(request.auth.uid)).data.get('active', false) == true;
+    }
+
+    function userBlocked() {
+      return signedIn()
+        && exists(/databases/$(db)/documents/users/$(request.auth.uid))
+        && get(/databases/$(db)/documents/users/$(request.auth.uid)).data.get('status', 'active') == 'blocked';
+    }
+
+    function licenseOk(key) {      // license exists AFTER this write, belongs to caller, not revoked
+      return key is string && key != '' && key != 'none'
+        && existsAfter(/databases/$(db)/documents/licenses/$(key))
+        && getAfter(/databases/$(db)/documents/licenses/$(key)).data.userId == request.auth.uid
+        && getAfter(/databases/$(db)/documents/licenses/$(key)).data.get('revoked', false) == false;
+    }
+
+    function deviceOwner(id) {
+      return signedIn()
+        && exists(/databases/$(db)/documents/devices/$(id))
+        && get(/databases/$(db)/documents/devices/$(id)).data.get('userId', '') == request.auth.uid;
+    }
+
+    // ---------------- admins ----------------
+    match /admins/{id} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == id);
+      allow create: if isAdmin();
+      allow update: if isAdmin() && (request.auth.uid != id || request.resource.data.get('active', true) == true);
+      allow delete: if isAdmin() && request.auth.uid != id;
+    }
+
+    // ---------------- licenses ----------------
+    // App: get by key (activation), listener on active key, transaction update on activation.
+    match /licenses/{key} {
+      allow get: if signedIn();
+      allow list: if isAdmin();                 // normal users can never enumerate keys
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        signedIn() && !userBlocked()
+        && resource.data.get('revoked', false) == false
+        && request.resource.data.get('revoked', false) == false
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['userId', 'isUsed', 'boundDevices', 'expiresAt', 'lastUsedAt'])
+        && request.resource.data.userId == request.auth.uid
+        && (resource.data.get('userId', null) == null || resource.data.get('userId', null) == ''
+            || resource.data.get('userId', null) == request.auth.uid)
+        && request.resource.data.boundDevices.hasAll(resource.data.get('boundDevices', []))
+        && request.resource.data.boundDevices.size() <= resource.data.get('boundDevices', []).size() + 1
+        && request.resource.data.boundDevices.size() <= resource.data.get('maxDevices', 1)
+        && (resource.data.get('expiresAt', 0) > 0
+              ? (request.resource.data.expiresAt == resource.data.expiresAt
+                 && resource.data.expiresAt > request.time.toMillis())
+              : request.resource.data.expiresAt
+                  <= request.time.toMillis() + resource.data.get('durationDays', 1) * 86400000 + 600000)
+      );
+    }
+
+    // ---------------- users ----------------
+    // App creates/updates its own doc ONLY via license activation (tier/activeLicenseKey/licenseExpiresAt) + lastSeenAt.
+    // 'status' (blocked) is admin-only.
+    match /users/{uid} {
+      function entitlementOk() {
+        let d = request.resource.data;
+        return d.get('tier', 'basic') == 'basic'
+          || (licenseOk(d.get('activeLicenseKey', null))
+              && getAfter(/databases/$(db)/documents/licenses/$(d.activeLicenseKey)).data.tier == d.tier);
+      }
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create: if isAdmin() || (signedIn() && request.auth.uid == uid
+        && !request.resource.data.keys().hasAny(['status', 'role', 'isAdmin', 'blocked'])
+        && entitlementOk());
+      allow update: if isAdmin() || (signedIn() && request.auth.uid == uid
+        && resource.data.get('status', 'active') != 'blocked'
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'role', 'isAdmin', 'blocked'])
+        && entitlementOk());
+      allow delete: if isAdmin();
+    }
+
+    // ---------------- devices ----------------
+    // Premium on the app comes from devices/{id}.status=='active' + tier + expiresAt. A normal user may only
+    // set those when a valid license (belongs to them, bound to THIS device, not revoked) backs it.
+    match /devices/{deviceId} {
+      function devLicOk(d) {
+        let k = d.get('licenseKey', d.get('activeLicenseKey', 'none'));
+        return licenseOk(k)
+          && getAfter(/databases/$(db)/documents/licenses/$(k)).data.boundDevices.hasAny([deviceId])
+          && (d.get('tier', 'basic') == 'basic'
+              || d.get('tier', 'basic') == getAfter(/databases/$(db)/documents/licenses/$(k)).data.tier);
+      }
+      function devExpiryOk(d) {   // device expiresAt may only mirror the license's own expiry
+        let k = d.get('licenseKey', d.get('activeLicenseKey', 'none'));
+        return devLicOk(d)
+          && d.get('expiresAt', 0) == getAfter(/databases/$(db)/documents/licenses/$(k)).data.get('expiresAt', 0);
+      }
+      function privOk() {
+        let d = request.resource.data;
+        let aff = d.diff(resource.data).affectedKeys();
+        return (!aff.hasAny(['status']) || d.status == 'pending' || (d.status == 'active' && devLicOk(d)))
+          && (!aff.hasAny(['tier']) || d.tier == 'basic' || devLicOk(d))
+          && (!aff.hasAny(['isPremium']) || d.isPremium == false || devLicOk(d))
+          && (!aff.hasAny(['licenseKey']) || d.licenseKey == null || devLicOk(d))
+          && (!aff.hasAny(['expiresAt']) || devExpiryOk(d))
+          && !aff.hasAny(['expiryDate', 'blocked', 'isBlocked']);
+      }
+      allow get: if isAdmin() || (signedIn() && resource.data.get('userId', request.auth.uid) == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (signedIn() && (
+          ( request.resource.data.get('status', 'pending') == 'pending'
+            && request.resource.data.get('tier', 'basic') == 'basic'
+            && request.resource.data.get('isPremium', false) == false
+            && !request.resource.data.keys().hasAny(['licenseKey', 'expiresAt', 'userId', 'blocked', 'isBlocked']) )
+          || ( request.resource.data.get('userId', '') == request.auth.uid
+               && request.resource.data.get('status', '') == 'active'
+               && devLicOk(request.resource.data) ) ));
+      allow update: if isAdmin() || (signedIn() && !userBlocked()
+        && resource.data.get('userId', request.auth.uid) == request.auth.uid
+        && resource.data.get('status', 'pending') != 'blocked'
+        && request.resource.data.get('userId', request.auth.uid) == request.auth.uid
+        && privOk());
+      allow delete: if isAdmin();
+    }
+
+    // ---------------- remote network control (app) ----------------
+    match /network_commands/{cmdId} {
+      allow create: if signedIn() && request.resource.data.get('sourceUid', '') == request.auth.uid;
+      allow get, list: if isAdmin() || (signedIn() && (
+          resource.data.get('sourceUid', '') == request.auth.uid
+          || deviceOwner(resource.data.targetDeviceId)));
+      allow update: if signedIn() && deviceOwner(resource.data.targetDeviceId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['executed', 'resultMessage', 'executedAt']);
+      allow delete: if isAdmin();
+    }
+    match /device_network_status/{deviceId} {
+      allow read: if isAdmin() || deviceOwner(deviceId);
+      allow write: if signedIn() && (!exists(/databases/$(db)/documents/devices/$(deviceId)) || deviceOwner(deviceId));
+    }
+
+    // ---------------- config the app reads before login ----------------
+    match /system_config/{id} {
+      allow read: if true;                      // maintenance + app_update (no secrets here!)
+      allow write: if isAdmin();
+    }
+
+    // ---------------- admin-panel-only collections ----------------
+    match /app_updates/{id}           { allow read, write: if isAdmin(); }
+    match /app_config/{id}            { allow read, write: if isAdmin(); }
+    match /plans/{id}                 { allow read, write: if isAdmin(); }
+    match /notification_requests/{id} { allow read, write: if isAdmin(); }
+    match /adminAuditLogs/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.adminUid == request.auth.uid;
+      allow update, delete: if false;           // append-only
+    }
+  }
+}
+```
+
+### E.2 `storage.rules` (only if Storage is enabled)
+```
+// Firebase Storage rules. Needs Storage enabled (Blaze may be required on new projects).
+// Cross-service firestore.get() in Storage rules: verify in the Rules Playground on your project.
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.get('active', false) == true;
+    }
+    // APKs: download link must work for app users (browser, token URL) -> reading is public ONLY because
+    // the release is meant to be public. Upload/delete = admin only.
+    match /apks/{versionCode}/{file} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource.size > 0 && request.resource.size < 200 * 1024 * 1024
+        && request.resource.contentType == 'application/vnd.android.package-archive'
+        && file.matches('.*\\.apk');
+      allow delete: if isAdmin();
+    }
+    match /backups/{file} { allow read, write, delete: if isAdmin(); }
+    match /{p=**} { allow read, write: if false; }
+  }
+}
+```
+
+**Rule-design notes for the agent:** `licenseOk()` uses `existsAfter/getAfter` so the activation transaction (license + user + device written together) is validated as one unit. A normal user can set premium fields only when a license exists that (a) belongs to them, (b) is not revoked, (c) lists **this** device in `boundDevices`, and (d) matches the tier. `expiresAt` on a device may only mirror the license's `expiresAt`. A license update by a normal user may touch only `userId,isUsed,boundDevices,expiresAt,lastUsedAt`, may add at most one device, never exceeds `maxDevices`, and the first activation may not set an expiry beyond `now + durationDays`.
+Write rule unit tests with `@firebase/rules-unit-testing` + the emulator for at least the cases in PART I §I.2.
+
+---
+
+## PART F — Firebase Console setup (owner does this — strict order)
+
+1. **Backup first.** Copy the current Firestore rules text. Export data if possible (or use the admin panel's Backup).
+2. **Authentication → Sign-in method:** enable **Anonymous** (app) and **Email/Password** (admin). Settings → Authorized domains: add the domain that hosts `index_ai3.html` (e.g. `ai--server.web.app`, `localhost`).
+3. **Create the first admin BEFORE deploying rules.** Authentication → Users → add admin e-mail/password → copy its **UID**. Firestore → collection `admins` → document id = that UID → fields: `active` (boolean) `true`, `email` (string), `name` (string), `role` (string) `super_admin`. *If you skip this you lock yourself out.*
+4. **Firestore → Rules:** paste `firestore.rules` from PART E → test in **Rules Playground** (cases in §I.2) → **Publish**.
+5. **Optional Storage:** Storage → Get started (may require Blaze on new projects — if it does not work on Spark, use the admin's "Direct Download Link" for updates). Rules → paste `storage.rules`.
+6. **Hosting the admin:** `firebase init hosting`, public folder containing **only** `index_ai3.html` (rename to `index.html`) → `firebase deploy --only hosting`. Never put source code, `google-services.json`, markdown prompts or keystores in `public/`.
+7. **Google Cloud Console → APIs & Services → Credentials:** restrict the Android key (package `com.jarvis.assistant` + release SHA-1) and the web key (HTTP referrers = your admin domain).
+8. Open the admin → login → **Run Setup** → every line must be **OK**.
+
+---
+
+## PART G — Admin panel behaviour (already implemented in the supplied `index_ai3.html`; the agent must keep it consistent with PART C)
+
+- Admin gate: Firestore `admins/{uid}.active === true` (no Realtime Database).
+- Licenses: key `NUSRAT-AR-XXXX-XXXX` (crypto RNG, uniqueness via transaction), Long-ms dates, assign without overwriting another user's active license, extend (durationDays before activation, `expiresAt` after), **Reset Binding** (clears `boundDevices/userId/isUsed` and demotes devices/users holding that key), revoke, delete.
+- Premium grant/revoke/extend/upgrade: writes `users` **and** that user's `devices` (`status,tier,isPremium,expiresAt,licenseKey`).
+- Device block/unblock: stores `statusBeforeBlock`; unblock never sets `active` blindly.
+- Maintenance → `system_config/maintenance`; Update → `system_config/app_update`.
+- **App updates — two modes, both publish through the same path:**
+  1. *Upload APK* → Storage `apks/<versionCode>/<file>.apk` + SHA-256 + `app_updates` record (`source:"storage"`).
+  2. *Direct Download Link* → https URL validated (rejects Drive/Mediafire/Dropbox page links), optional SHA-256, `source:"link"`.
+  Publish picks the highest `versionCode` among published releases and mirrors it to `system_config/app_update`; unpublishing/deleting the last one sets `isActive:false`. Delete removes the Storage object first (record kept with `status:"delete_failed"` if it fails).
+- Notifications and non-maintenance Remote Config are explicitly labelled "queued / not enforced by the app".
+
+### Admin speed / data-loading rules (agent: implement the ones marked TODO)
+- Each view subscribes only when opened and unsubscribes when left (keep the existing `subs`/`unsubAll`).
+- **TODO** replace fixed `limit(300)` lists with cursor pagination (`orderBy(...).limit(25).startAfter(lastDoc)`), debounced search (300 ms), and server-side filters.
+- **TODO** dashboard counters through aggregation count queries (`getCountFromServer` in the modular SDK) instead of downloading collections.
+- Never attach a listener to `adminAuditLogs` for the whole collection — query newest 50 only.
+- Static shell (HTML/CSS/JS) loads before login; no Firestore read happens before successful admin verification.
+- Required composite indexes **today: none** (all queries are single-field equality or `array-contains`). When pagination with filters is added, create indexes such as `users(status ASC, lastSeenAt DESC)`, `licenses(revoked ASC, createdAt DESC)`, `devices(status ASC, lastSeenAt DESC)` — Firestore prints the exact link in the console error.
+
+---
+
+## PART H — Definition of done
+
+The work is complete only when ALL are true:
+1. `./gradlew assembleDebug` and `assembleRelease` succeed; release APK is signed with the owner's release key.
+2. Rules deployed from PART E; Playground cases (§I.2) behave as stated.
+3. Every test in §I.1 passes on a **real phone with the release APK**.
+4. Relay refuses a second registration of an existing `deviceId` with a different key and ignores `payload.senderDeviceId`.
+5. No secrets/keystores/prompts in the repo or `public/`.
+6. The report in PART J is delivered with real PASS/FAIL/BLOCKED/NOT TESTED per item.
+
+---
+
+## PART I — Tests
+
+### I.1 Phone tests (real Firebase)
+| # | Steps | Expected |
+|---|---|---|
+| 1 | Admin → License → `+ Unassigned Keys` (pro, 30 d, 1 device) | key like `NUSRAT-AR-ABCD-2345`; Firestore doc has numeric `createdAt`, `expiresAt:0` |
+| 2 | Fresh install → enter key | Premium on; license `isUsed:true,userId,boundDevices,expiresAt>0`; `users/{uid}` created; `devices/{id}` `status:active,tier:pro` |
+| 3 | Wrong key / second phone (max 1) | "invalid" / "device limit" |
+| 4 | Admin Revoke | phone drops to basic shortly |
+| 5 | Admin Reset Binding, activate on another phone | works |
+| 6 | Set license `expiresAt` to the past (Console) | app basic |
+| 7 | Admin block user (`users/{uid}.status="blocked"`) | app shows Blocked screen; activation refused; unblock → returns |
+| 8 | Publish a **direct-link** release with higher `versionCode` | app → System Updates → "Update available" → Download opens link → APK installs |
+| 9 | Same with **Storage-upload** release (if Storage works) | same; delete removes file + record |
+| 10 | Force update | back button disabled; auto-check on app start |
+| 11 | Maintenance on (start in future → no effect; now → maintenance screen; off → returns) | as stated |
+| 12 | Admin: wrong password → generic error; non-admin account → "Access Denied"; disable an admin → next login denied; disabling the last admin → refused | as stated |
+| 13 | Nexus pair + `fs.browse` over TLS; Firestore WiFi-toggle command with HMAC | works; forged command rejected |
+| 14 | Relay: register an existing deviceId with another key | rejected |
+
+### I.2 Rules Playground / emulator cases
+- Anonymous user **create** `devices/x` with `{status:'active',tier:'master'}` → **Deny**.
+- Anonymous user **list** `licenses` → **Deny**; **get** `licenses/KEY` → Allow.
+- Activation transaction (license update of the 5 allowed keys + user set + device set) for a valid unrevoked license bound to this device → **Allow**; same with `tier` changed on the license → **Deny**; with `maxDevices` changed → **Deny**; with expiry beyond `now+durationDays` on first activation → **Deny**.
+- Blocked user activation → **Deny**.
+- Non-admin write to `app_updates`, `admins`, `system_config` → **Deny**; admin → Allow; admin disabling own `admins` doc → **Deny**.
+- `adminAuditLogs` update/delete → **Deny** for everyone.
+
+---
+
+## PART J — Report format the agent must return
+
+For every item C1–C5, H1–H4, M1–M5: **status (PASS / FAIL / BLOCKED / NOT TESTED)**, files changed, what was changed, evidence (command output / test name). Then: list of all changed files, Rules deployed or not, remaining risks, rollback steps (git revert + old rules text), and the exact manual steps still needed from the owner (keystore creation, console steps). **Do not write "100% complete" while any item is FAIL/BLOCKED/NOT TESTED.**
+
+---
+
+## PART K — Known limits (be honest with the owner)
+
+- Firebase Storage upload may not work on the Spark plan for new projects; the direct-link method is the guaranteed path.
+- Notifications cannot reach the app without a receiver (FCM needs a trusted sender; Cloud Functions need Blaze). In-app polling of a Firestore collection is the Spark-compatible option (D10).
+- Anonymous accounts are tied to the install; reinstall needs "Reset Binding" until Google/Email linking is added.
+- Real-time behaviour depends on Firestore snapshot listeners already present in `LicenseManager`; offline devices apply changes on reconnect.
+- APK signing key loss = no more updates for existing installs. Back it up.

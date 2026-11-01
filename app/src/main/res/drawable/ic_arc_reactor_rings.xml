@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="160dp"
+    android:height="160dp"
+    android:viewportWidth="160"
+    android:viewportHeight="160">
+    <!-- Outer dashed/segmented ring -->
+    <path
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M80,10 A70,70 0 1,1 79.9,10" />
+    <path
+        android:strokeColor="#7C3AED"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M80,24 A56,56 0 1,1 79.9,24" />
+    <!-- 8 Reactor notches -->
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M78,12 L82,12 L82,22 L78,22 Z" />
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M78,138 L82,138 L82,148 L78,148 Z" />
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M12,78 L22,78 L22,82 L12,82 Z" />
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M138,78 L148,78 L148,82 L138,82 Z" />
+    <!-- Diagonal notches -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M32,32 L40,40 L37,43 L29,35 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M128,128 L120,120 L123,117 L131,125 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M128,32 L120,40 L117,37 L125,29 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M32,128 L40,120 L43,123 L35,131 Z" />
+</vector>

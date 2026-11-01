@@ -43,10 +43,10 @@ class GeminiLiveWebSocket(
 
     private val client = sharedClient
 
-    private var activeModel: String = when (model) {
-        GeminiConstants.MODEL_3_8_LIVE -> GeminiConstants.MODEL_3_8_LIVE
-        GeminiConstants.MODEL_3_1_FLASH_AGENT -> GeminiConstants.MODEL_3_1_FLASH
-        else -> if (model.isNotBlank() && !model.contains("2.5")) model else GeminiConstants.DEFAULT_MODEL
+    private var activeModel: String = sanitizeModelName(model)
+
+    private fun sanitizeModelName(rawModel: String): String {
+        return if (rawModel.startsWith("models/")) rawModel else "models/$rawModel"
     }
 
     private var webSocket: WebSocket? = null
@@ -83,21 +83,22 @@ class GeminiLiveWebSocket(
                 .url(url)
                 .build()
 
-            webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            val rawListener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.d(TAG, "WebSocket connected to Gemini Live. Sending BidiSetup...")
+                    Log.i(TAG, "🟢 WebSocket onOpen: Connected successfully to Gemini Live endpoint. Sending BidiSetup...")
                     isConnected.set(true)
                     isSetupComplete.set(false)
                     listener.onConnectionStateChanged("CONFIGURING...")
-                    // Send setup message FIRST before enabling audio streaming
                     sendSetupMessage(webSocket)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    Log.d(TAG, "📥 [Gemini RX text] (len=${text.length}): ${text.take(300)}")
                     handleIncomingMessage(text)
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    Log.d(TAG, "📥 [Gemini RX bytes] (len=${bytes.size})")
                     handleIncomingMessage(bytes.utf8())
                 }
 
@@ -137,16 +138,19 @@ class GeminiLiveWebSocket(
                                            reason.contains("not found", ignoreCase = true) ||
                                            reason.contains("not supported", ignoreCase = true)
                         if (isModelError) {
-                            if (activeModel != GeminiConstants.MODEL_3_8_LIVE) {
-                                Log.w(TAG, "Model $activeModel rejected by Gemini ($reason). Auto-falling back to ${GeminiConstants.MODEL_3_8_LIVE}")
-                                activeModel = GeminiConstants.MODEL_3_8_LIVE
+                            val fallbackModel = GeminiConstants.MODEL_3_1_FLASH
+                            if (activeModel != fallbackModel) {
+                                Log.w(TAG, "Model $activeModel rejected by Gemini ($reason). Auto-falling back to $fallbackModel")
+                                activeModel = fallbackModel
                                 listener.onConnectionStateChanged("RECONNECTING...")
                                 scheduleReconnect()
                                 return
                             }
                         }
-                        listener.onError("Gemini setup was rejected: $reason", isFatal = true, errorCode = "SETUP_REJECTED")
-                        listener.onConnectionStateChanged("OFFLINE")
+                        listener.onError("Gemini setup rejected: $reason. Falling back to default engine.", isFatal = false, errorCode = "SETUP_REJECTED")
+                        activeModel = GeminiConstants.MODEL_3_1_FLASH
+                        scheduleReconnect()
+                        return
                     } else if (!isManuallyStopped.get()) {
                         listener.onConnectionStateChanged("RECONNECTING...")
                         scheduleReconnect()
@@ -198,7 +202,9 @@ class GeminiLiveWebSocket(
                         listener.onConnectionStateChanged("OFFLINE")
                     }
                 }
-            })
+            }
+
+            webSocket = client.newWebSocket(request, GeminiDebugBridge(activeModel, rawListener))
         } catch (e: Exception) {
             Log.e(TAG, "Error initiating WebSocket connection: ${e.message}", e)
             listener.onError("Connection failed: ${e.message}", isFatal = true, errorCode = "CONNECTION_FAILED")
@@ -211,25 +217,22 @@ class GeminiLiveWebSocket(
         val setup = JSONObject().apply {
             put("setup", JSONObject().apply {
                 put("model", activeModel)
-                put("system_instruction", JSONObject().apply {
+                put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().put(JSONObject().put("text", effectivePrompt)))
                 })
-                put("generation_config", JSONObject().apply {
-                    put("response_modalities", JSONArray().put("AUDIO"))
-                    put("speech_config", JSONObject().apply {
-                        put("voice_config", JSONObject().apply {
-                            put("prebuilt_voice_config", JSONObject().apply {
-                                put("voice_name", voiceName)
+                put("generationConfig", JSONObject().apply {
+                    put("responseModalities", JSONArray().put("AUDIO"))
+                    put("speechConfig", JSONObject().apply {
+                        put("voiceConfig", JSONObject().apply {
+                            put("prebuiltVoiceConfig", JSONObject().apply {
+                                put("voiceName", voiceName)
                             })
                         })
                     })
                     put("temperature", 0.6)
-                    // Gemini 2.5 Flash native audio has thinking enabled by default (budget=2048),
-                    // which causes a 2-3 second delay before generating speech.
-                    // Setting thinking_budget to 0 disables chain-of-thought, yielding instant (<1s) conversational response.
                     if (activeModel.contains("2.5")) {
-                        put("thinking_config", JSONObject().apply {
-                            put("thinking_budget", 0)
+                        put("thinkingConfig", JSONObject().apply {
+                            put("thinkingBudget", 0)
                         })
                     }
                 })
@@ -649,7 +652,8 @@ class GeminiLiveWebSocket(
             })
         }
         val json = setup.toString()
-        Log.d(TAG, "Sending BidiSetup payload to Gemini Live with tools")
+        Log.i(TAG, "📤 [Gemini TX setup] model=$activeModel, voice=$voiceName, jsonLen=${json.length}")
+        Log.d(TAG, "📤 [Gemini TX setup payload]: ${json.take(500)}")
         ws.send(json)
     }
 
@@ -839,8 +843,8 @@ class GeminiLiveWebSocket(
     fun sendToolResponse(callId: String, functionName: String, result: JSONObject) {
         try {
             val msg = JSONObject().apply {
-                put("tool_response", JSONObject().apply {
-                    put("function_responses", JSONArray().put(JSONObject().apply {
+                put("toolResponse", JSONObject().apply {
+                    put("functionResponses", JSONArray().put(JSONObject().apply {
                         put("id", callId)
                         put("name", functionName)
                         put("response", result)
@@ -848,7 +852,7 @@ class GeminiLiveWebSocket(
                 })
             }
             webSocket?.send(msg.toString())
-            Log.d(TAG, "Sent tool_response for $functionName: $result")
+            Log.d(TAG, "Sent toolResponse for $functionName: $result")
         } catch (e: Exception) {
             Log.e(TAG, "sendToolResponse failed: ${e.message}", e)
         }
@@ -897,31 +901,31 @@ class GeminiLiveWebSocket(
 
     /**
      * In Gemini Live BidiGenerateContent, streaming audio via realtimeInput handles turn-taking
-     * natively via server-side neural VAD. Sending empty client_content cancels active generation.
+     * natively via server-side neural VAD. Sending empty clientContent cancels active generation.
      */
     fun sendAudioStreamEnd() {
         // No-op: server-side VAD handles turn completion smoothly
     }
 
     /**
-     * Sends a text prompt to Gemini Live using the client_content turn protocol.
+     * Sends a text prompt to Gemini Live using the clientContent turn protocol.
      */
     fun sendClientContent(text: String) {
         if (!isConnected.get() || !isSetupComplete.get() || text.isBlank()) return
         try {
             val msg = JSONObject().apply {
-                put("client_content", JSONObject().apply {
+                put("clientContent", JSONObject().apply {
                     put("turns", JSONArray().put(JSONObject().apply {
                         put("role", "user")
                         put("parts", JSONArray().put(JSONObject().apply {
                             put("text", text)
                         }))
                     }))
-                    put("turn_complete", true)
+                    put("turnComplete", true)
                 })
             }
             webSocket?.send(msg.toString())
-            Log.d(TAG, "Sent client_content: $text")
+            Log.d(TAG, "Sent clientContent: $text")
         } catch (e: Exception) {
             Log.e(TAG, "sendClientContent failed: ${e.message}", e)
         }

@@ -265,7 +265,7 @@ object FeatureRegistry {
             "File-format handoff" to "Storage Access Framework", "Cross-app draft relay" to "None",
             "Deep-link safety preview" to "None", "Clipboard share confirmation" to "None",
             "WebDAV personal sync" to "INTERNET", "CalDAV event sync" to "INTERNET",
-            "Local-network discovery" to "INTERNET", "Companion pairing QR" to "CAMERA",
+            "JARVIS NEXUS Remote Control" to "INTERNET", "Companion pairing QR" to "CAMERA",
             "Data-schema mapper" to "None", "Import duplicate resolver" to "Storage Access Framework",
             "External-app return handler" to "None", "Browser reading handoff" to "None",
             "Task-provider adapter" to "None", "Secure-token rotation reminder" to "USE_BIOMETRIC",
