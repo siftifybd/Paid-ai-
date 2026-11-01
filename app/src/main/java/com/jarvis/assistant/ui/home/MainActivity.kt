@@ -26,6 +26,7 @@ import com.jarvis.assistant.databinding.ActivityMainBinding
 import com.jarvis.assistant.ui.chat.ChatFragment
 import com.jarvis.assistant.ui.settings.SettingsFragment
 import com.jarvis.assistant.util.PermissionHelper
+import com.jarvis.assistant.util.PermissionManager
 import com.jarvis.assistant.data.auth.DeviceAuthManager
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.delay
@@ -51,32 +52,52 @@ class MainActivity : AppCompatActivity() {
     private val settingsFragment by lazy { SettingsFragment() }
     private val updatesFragment by lazy { UpdatesFragment() }
 
-    private val requestAudioPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            checkPermissionsAndStart()
+    private var pendingFeatureAction: (() -> Unit)? = null
+
+    val requestBasicPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO]
+            ?: PermissionManager.hasRecordAudioPermission(this)
+
+        if (audioGranted) {
+            viewModel.restartOrStartSession()
         } else {
-            Toast.makeText(
-                this,
-                "Microphone permission is required for voice conversation.",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(this, "মাইক্রোফোন পারমিশন এলাউ করলে ভয়েস ও স্পিকার কাজ করবে।", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private val requestNotificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            checkPermissionsAndStart()
+    val requestUnifiedPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO]
+            ?: PermissionManager.hasRecordAudioPermission(this)
+        val cameraGranted = permissions[Manifest.permission.CAMERA]
+            ?: PermissionManager.hasCameraPermission(this)
+        val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.POST_NOTIFICATIONS]
+                ?: PermissionManager.hasNotificationPermission(this)
+        } else true
+
+        android.util.Log.d("MainActivity", "Unified permissions result: audio=$audioGranted, camera=$cameraGranted, notif=$notifGranted")
+        if (audioGranted) {
+            viewModel.restartOrStartSession()
         } else {
-            Toast.makeText(
-                this,
-                "Notification permission is required to run in the background.",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(this, "মাইক্রোফোন পারমিশন এলাউ করলে ভয়েস ও স্পিকার কাজ করবে।", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    val requestPremiumPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val grantedCount = permissions.values.count { it }
+        val totalCount = permissions.size
+        if (totalCount > 0) {
+            Toast.makeText(this, "Permissions updated: $grantedCount/$totalCount granted", Toast.LENGTH_SHORT).show()
+        }
+        val action = pendingFeatureAction
+        pendingFeatureAction = null
+        action?.invoke()
     }
 
     private val mediaProjectionManager by lazy {
@@ -434,11 +455,54 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun requestPermissionsForFeature(featureName: String, onGranted: () -> Unit) {
+        val missing = when {
+            featureName.contains("Wi-Fi", ignoreCase = true) || featureName.contains("NEXUS", ignoreCase = true) -> {
+                PermissionManager.getWifiPermissions().filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            featureName.contains("Camera", ignoreCase = true) || featureName.contains("Screen", ignoreCase = true) -> {
+                listOf(Manifest.permission.CAMERA).filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            featureName.contains("Contact", ignoreCase = true) -> {
+                PermissionManager.CONTACTS_PERMISSIONS.filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            featureName.contains("Call", ignoreCase = true) || featureName.contains("Phone", ignoreCase = true) -> {
+                PermissionManager.PHONE_CALL_PERMISSIONS.filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            featureName.contains("SMS", ignoreCase = true) -> {
+                PermissionManager.SMS_PERMISSIONS.filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            featureName.contains("Location", ignoreCase = true) || featureName.contains("Weather", ignoreCase = true) -> {
+                listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+            }
+            else -> emptyList()
+        }
+
+        if (missing.isEmpty()) {
+            onGranted()
+        } else {
+            pendingFeatureAction = onGranted
+            requestPremiumPermissionsLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     private fun openLockedFeatureOrLicense(featureName: String, action: () -> Unit) {
         val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(this)
         if (licenseManager.isPremiumActive.value) {
             closeDrawer()
-            action()
+            requestPermissionsForFeature(featureName, action)
         } else {
             closeDrawer()
             Toast.makeText(
@@ -706,9 +770,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun triggerHapticFeedback(durationMs: Long = 45L) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                vm?.defaultVibrator?.vibrate(android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(durationMs)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Haptic vibration skipped: ${e.message}")
+        }
+    }
+
+    private var lastMicOrOrbClickTime = 0L
+
     fun handleMicOrOrbClick() {
-        if (!JarvisConversationService.isSessionOn.value) {
-            checkPermissionsAndStart()
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastMicOrOrbClickTime < 350L) {
+            return
+        }
+        lastMicOrOrbClickTime = now
+
+        triggerHapticFeedback(45L)
+        binding.tabMic.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+
+        if (!PermissionManager.hasRecordAudioPermission(this)) {
+            requestUnifiedPermissionsThenStart()
+            return
+        }
+
+        val connStatus = JarvisConversationService.connectionStatus.value
+        val isSessionOn = JarvisConversationService.isSessionOn.value
+
+        if (!isSessionOn || connStatus == "OFFLINE" || connStatus.startsWith("RECONNECT") || connStatus.startsWith("COOLDOWN") || connStatus.startsWith("ERROR") || connStatus.contains("ERROR")) {
+            viewModel.restartOrStartSession()
         } else if (JarvisConversationService.conversationState.value == ConversationState.SPEAKING) {
             JarvisConversationService.interruptPlayback()
         } else {
@@ -717,6 +820,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun handleHoldMicOrOrb() {
+        triggerHapticFeedback(75L)
         binding.tabMic.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         if (JarvisConversationService.isSessionOn.value) {
             viewModel.turnOffSession()
@@ -733,38 +837,59 @@ class MainActivity : AppCompatActivity() {
         handleHoldMicOrOrb()
     }
 
-    private fun checkPermissionsAndStart() {
-        if (!PermissionHelper.hasRecordAudioPermission(this)) {
-            requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
-        }
+    fun requestAllPermissions() {
+        requestUnifiedPermissionsThenStart()
+    }
 
-        if (!PermissionHelper.hasNotificationPermission(this)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                return
+    fun requestUnifiedPermissionsThenStart() {
+        val missing = PermissionManager.getMissingUnifiedPermissions(this)
+        if (missing.isEmpty() || PermissionManager.hasRecordAudioPermission(this)) {
+            val isSessionOn = JarvisConversationService.isSessionOn.value
+            val connStatus = JarvisConversationService.connectionStatus.value
+            if (!isSessionOn || connStatus == "OFFLINE" || connStatus.startsWith("RECONNECT") || connStatus.startsWith("COOLDOWN") || connStatus.startsWith("ERROR") || connStatus.contains("ERROR")) {
+                viewModel.restartOrStartSession()
+            } else if (JarvisConversationService.conversationState.value == ConversationState.SPEAKING) {
+                JarvisConversationService.interruptPlayback()
+            } else {
+                viewModel.restartOrStartSession()
             }
+        } else {
+            requestUnifiedPermissionsLauncher.launch(missing)
         }
+    }
 
-        if (!PermissionHelper.hasBatteryOptimizationPermission(this)) {
-            showBatteryPermissionDialog()
-            return
+    fun requestBasicPermissionsThenStart() {
+        val missing = PermissionManager.getMissingVoicePermissions(this)
+        if (missing.isEmpty() || PermissionManager.hasRecordAudioPermission(this)) {
+            viewModel.restartOrStartSession()
+        } else {
+            requestBasicPermissionsLauncher.launch(missing)
         }
+    }
 
-        viewModel.toggleSession()
+    private fun checkPermissionsAndStart() {
+        if (!PermissionManager.hasRecordAudioPermission(this)) {
+            requestUnifiedPermissionsThenStart()
+        } else {
+            viewModel.toggleSession()
+        }
+    }
+
+    private fun showPermissionDeniedDialog() {
+        Toast.makeText(this, "মাইক্রোফোন পারমিশন এলাউ করলে ভয়েস ও স্পিকার কাজ করবে।", Toast.LENGTH_SHORT).show()
     }
 
     private fun showBatteryPermissionDialog() {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Unrestricted Battery Required")
-            .setMessage("Jarvis requires Unrestricted Battery access so it can stay active in the background and respond to wake words.\n\nPlease allow it or open Settings.")
+            .setTitle("Unrestricted Battery Recommended")
+            .setMessage("Jarvis works best in background with Unrestricted Battery access.\n\nWould you like to allow it now?")
             .setPositiveButton("ALLOW") { _, _ ->
                 PermissionHelper.requestBatteryOptimization(this)
             }
             .setNeutralButton("OPEN SETTINGS") { _, _ ->
                 selectTab(TAB_SETTINGS)
             }
-            .setNegativeButton("CANCEL", null)
+            .setNegativeButton("LATER", null)
             .show()
     }
 
@@ -824,6 +949,10 @@ class MainActivity : AppCompatActivity() {
 
                 launch {
                     viewModel.eventFlow.collect { message ->
+                        if (message == "REQUEST_BASIC_PERMISSIONS") {
+                            requestBasicPermissionsThenStart()
+                            return@collect
+                        }
                         activeSnackbar?.dismiss()
                         activeSnackbar = Snackbar.make(binding.rootMainLayout, message, Snackbar.LENGTH_SHORT).apply {
                             setAnchorView(binding.bottomDock)

@@ -34,10 +34,11 @@ class GeminiLiveWebSocket(
         private const val TAG = "GeminiLiveWebSocket"
         // Shared OkHttpClient across all sessions — reuses connection pool, DNS cache, and TLS sessions
         private val sharedClient = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS)
-            .connectTimeout(5, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
-            .pingInterval(60, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
             .build()
     }
 
@@ -52,11 +53,15 @@ class GeminiLiveWebSocket(
     private var webSocket: WebSocket? = null
     private val isConnected = AtomicBoolean(false)
     private val isSetupComplete = AtomicBoolean(false)
+    private val isConnecting = AtomicBoolean(false)
     private val isManuallyStopped = AtomicBoolean(false)
+    private val lastRxTimeMs = AtomicLong(0L)
     private var coroutineScope: CoroutineScope? = null
 
     private var sessionRenewalJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
+    private var retryCount = 0
     var promptProvider: (() -> String)? = null
 
     fun isSessionReady(): Boolean = isConnected.get() && isSetupComplete.get()
@@ -64,6 +69,7 @@ class GeminiLiveWebSocket(
     fun connect(scope: CoroutineScope) {
         coroutineScope = scope
         isManuallyStopped.set(false)
+        retryCount = 0
         initiateConnection()
     }
 
@@ -73,6 +79,20 @@ class GeminiLiveWebSocket(
             listener.onError("Gemini API Key is missing. Please configure it in Settings.", isFatal = true, errorCode = "API_KEY_MISSING")
             listener.onConnectionStateChanged("OFFLINE")
             return
+        }
+
+        if (isConnecting.getAndSet(true)) {
+            Log.w(TAG, "initiateConnection already in progress; skipping duplicate trigger.")
+            return
+        }
+
+        // Cancel previous WebSocket instance to avoid zombie sockets
+        try {
+            webSocket?.cancel()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error cancelling existing socket: ${e.message}")
+        } finally {
+            webSocket = null
         }
 
         listener.onConnectionStateChanged("CONNECTING...")
@@ -86,36 +106,63 @@ class GeminiLiveWebSocket(
             val rawListener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(TAG, "🟢 WebSocket onOpen: Connected successfully to Gemini Live endpoint. Sending BidiSetup...")
+                    updateRxTime()
                     isConnected.set(true)
                     isSetupComplete.set(false)
+                    isConnecting.set(false)
                     listener.onConnectionStateChanged("CONFIGURING...")
                     sendSetupMessage(webSocket)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    updateRxTime()
                     Log.d(TAG, "📥 [Gemini RX text] (len=${text.length}): ${text.take(300)}")
                     handleIncomingMessage(text)
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    updateRxTime()
                     Log.d(TAG, "📥 [Gemini RX bytes] (len=${bytes.size})")
                     handleIncomingMessage(bytes.utf8())
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.d(TAG, "WebSocket closing: $code / $reason")
+                    Log.w(TAG, "⚠️ [WebSocket onClosing] Handshake closing initiated by server/network | Code: $code | Reason: '$reason' | Model: $activeModel")
                     webSocket.close(1000, null)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.d(TAG, "WebSocket closed: $code / $reason")
+                    val codeDescription = when (code) {
+                        1000 -> "1000 (Normal Closure)"
+                        1001 -> "1001 (Going Away)"
+                        1002 -> "1002 (Protocol Error)"
+                        1003 -> "1003 (Unsupported Data)"
+                        1005 -> "1005 (No Status Received)"
+                        1006 -> "1006 (Abnormal Closure / Socket Dropped)"
+                        1007 -> "1007 (Invalid Frame Payload Data)"
+                        1008 -> "1008 (Policy Violation / Setup Rejected)"
+                        1009 -> "1009 (Message Too Big)"
+                        1010 -> "1010 (Mandatory Extension Missing)"
+                        1011 -> "1011 (Internal Server Error)"
+                        1015 -> "1015 (TLS Handshake Failure)"
+                        else -> "$code (Custom/Extension Code)"
+                    }
+                    val elapsedSilence = android.os.SystemClock.elapsedRealtime() - lastRxTimeMs.get()
+                    Log.w(TAG, "🔴 [WebSocket onClosed] Disconnected from Gemini Live server!")
+                    Log.w(TAG, "   ├─ Closure Code: $codeDescription")
+                    Log.w(TAG, "   ├─ Reason: '${reason.ifBlank { "No reason provided by server" }}'")
+                    Log.w(TAG, "   ├─ Active Model: $activeModel")
+                    Log.w(TAG, "   ├─ Is Manually Stopped: ${isManuallyStopped.get()}")
+                    Log.w(TAG, "   ├─ Retry Attempt #: $retryCount")
+                    Log.w(TAG, "   └─ Elapsed Silence: ${elapsedSilence}ms")
+
                     isConnected.set(false)
                     isSetupComplete.set(false)
+                    isConnecting.set(false)
                     stopTimers()
 
                     val isApiKeyError = reason.contains("API_KEY_INVALID", ignoreCase = true) ||
                                        reason.contains("API key not valid", ignoreCase = true) ||
-                                       reason.contains("API key", ignoreCase = true) ||
                                        reason.contains("key invalid", ignoreCase = true)
                     if (isApiKeyError) {
                         Log.e(TAG, "Gemini rejected session due to invalid API key (code=$code, reason=$reason)")
@@ -129,7 +176,7 @@ class GeminiLiveWebSocket(
                     if (isQuotaError) {
                         Log.w(TAG, "Gemini rate-limited or connection collision (code=$code, reason=$reason). Retrying in cooldown...")
                         listener.onConnectionStateChanged("COOLDOWN • RETRYING")
-                        scheduleReconnect()
+                        scheduleReconnect(forceDelayMs = 5000L)
                         return
                     }
 
@@ -138,7 +185,7 @@ class GeminiLiveWebSocket(
                                            reason.contains("not found", ignoreCase = true) ||
                                            reason.contains("not supported", ignoreCase = true)
                         if (isModelError) {
-                            val fallbackModel = GeminiConstants.MODEL_3_1_FLASH
+                            val fallbackModel = "models/" + GeminiConstants.MODEL_3_8_LIVE
                             if (activeModel != fallbackModel) {
                                 Log.w(TAG, "Model $activeModel rejected by Gemini ($reason). Auto-falling back to $fallbackModel")
                                 activeModel = fallbackModel
@@ -147,9 +194,10 @@ class GeminiLiveWebSocket(
                                 return
                             }
                         }
-                        listener.onError("Gemini setup rejected: $reason. Falling back to default engine.", isFatal = false, errorCode = "SETUP_REJECTED")
-                        activeModel = GeminiConstants.MODEL_3_1_FLASH
-                        scheduleReconnect()
+                        // Already on the default model and still rejected -> do NOT loop forever.
+                        Log.e(TAG, "Setup rejected on default model $activeModel: $reason")
+                        listener.onError("Gemini rejected the session setup: ${reason.ifBlank { "no reason given" }}. Check API key access to gemini-3.8-live in AI Studio.", isFatal = true, errorCode = "SETUP_REJECTED")
+                        listener.onConnectionStateChanged("ERROR • MODEL/KEY REJECTED")
                         return
                     } else if (!isManuallyStopped.get()) {
                         listener.onConnectionStateChanged("RECONNECTING...")
@@ -160,38 +208,78 @@ class GeminiLiveWebSocket(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    val code = response?.code ?: 0
-                    val responseBody = try { response?.body?.string() } catch (_: Exception) { null }
+                    val httpCode = response?.code ?: 0
+                    val httpMsg = response?.message ?: "N/A"
+                    val exceptionClass = t.javaClass.simpleName
                     val errorMsg = t.message ?: "WebSocket connection failure"
-                    Log.e(TAG, "WebSocket failure: code=$code, errorMsg=$errorMsg, body=$responseBody", t)
+                    val responseBody = try { response?.body?.string() } catch (_: Exception) { null }
+                    val elapsedSilence = android.os.SystemClock.elapsedRealtime() - lastRxTimeMs.get()
+
+                    val isClosedSocket = (t is java.net.SocketException && (t.message?.contains("Socket is closed", ignoreCase = true) == true || t.message?.contains("closed", ignoreCase = true) == true)) ||
+                            t is java.io.InterruptedIOException ||
+                            t is java.util.concurrent.CancellationException
+
+                    val isIntentionalClosure = isManuallyStopped.get() || isClosedSocket
+
+                    if (isIntentionalClosure) {
+                        Log.i(TAG, "ℹ️ [WebSocket onFailure] Clean session termination or socket close ($exceptionClass: $errorMsg, isManuallyStopped=${isManuallyStopped.get()})")
+                        isConnected.set(false)
+                        isSetupComplete.set(false)
+                        isConnecting.set(false)
+                        stopTimers()
+                        listener.onConnectionStateChanged("OFFLINE")
+                        return
+                    }
+
+                    Log.e(TAG, "💥 [WebSocket onFailure] Socket connection failed!")
+                    Log.e(TAG, "   ├─ Exception: $exceptionClass -> $errorMsg")
+                    Log.e(TAG, "   ├─ HTTP Status Code: $httpCode ($httpMsg)")
+                    Log.e(TAG, "   ├─ Active Model: $activeModel")
+                    Log.e(TAG, "   ├─ Retry Attempt #: $retryCount")
+                    Log.e(TAG, "   ├─ Is Manually Stopped: ${isManuallyStopped.get()}")
+                    Log.e(TAG, "   ├─ Elapsed Silence: ${elapsedSilence}ms")
+                    if (!responseBody.isNullOrBlank()) {
+                        Log.e(TAG, "   ├─ Response Body: $responseBody")
+                    }
+                    if (response != null && response.headers.size > 0) {
+                        Log.e(TAG, "   └─ Response Headers:")
+                        for (i in 0 until response.headers.size) {
+                            Log.e(TAG, "      • ${response.headers.name(i)}: ${response.headers.value(i)}")
+                        }
+                    } else {
+                        Log.e(TAG, "   └─ Response Headers: None")
+                    }
+                    Log.e(TAG, "Stacktrace details:", t)
+
                     isConnected.set(false)
                     isSetupComplete.set(false)
+                    isConnecting.set(false)
                     stopTimers()
 
-                    val isApiKeyError = code == 400 || code == 401 || code == 403 ||
+                    val isApiKeyError = httpCode == 400 || httpCode == 401 || httpCode == 403 ||
                             errorMsg.contains("400") || errorMsg.contains("403") || errorMsg.contains("401") ||
                             errorMsg.contains("API_KEY_INVALID", ignoreCase = true) ||
                             errorMsg.contains("API key not valid", ignoreCase = true) ||
                             (responseBody?.contains("API_KEY_INVALID", ignoreCase = true) == true) ||
                             (responseBody?.contains("API key not valid", ignoreCase = true) == true)
 
-                    val isQuotaError = code == 429 ||
+                    val isQuotaError = httpCode == 429 ||
                             errorMsg.contains("429") ||
                             errorMsg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
                             errorMsg.contains("quota", ignoreCase = true) ||
                             (responseBody?.contains("RESOURCE_EXHAUSTED", ignoreCase = true) == true)
 
                     if (isApiKeyError) {
-                        Log.e(TAG, "Fatal failure: Invalid API Key (HTTP $code: $errorMsg)")
+                        Log.e(TAG, "Fatal failure: Invalid API Key (HTTP $httpCode: $errorMsg)")
                         listener.onError("Invalid API Key: Google rejected the key. Please verify your Gemini API key in Settings.", isFatal = true, errorCode = "API_KEY_INVALID")
                         listener.onConnectionStateChanged("ERROR • INVALID KEY")
                         return
                     }
 
                     if (isQuotaError) {
-                        Log.w(TAG, "Quota / rate limit hit (HTTP $code: $errorMsg). Retrying in cooldown...")
+                        Log.w(TAG, "Quota / rate limit hit (HTTP $httpCode: $errorMsg). Retrying in cooldown...")
                         listener.onConnectionStateChanged("COOLDOWN • RETRYING")
-                        scheduleReconnect()
+                        scheduleReconnect(forceDelayMs = 5000L)
                         return
                     }
 
@@ -204,9 +292,10 @@ class GeminiLiveWebSocket(
                 }
             }
 
-            webSocket = client.newWebSocket(request, GeminiDebugBridge(activeModel, rawListener))
+            webSocket = client.newWebSocket(request, GeminiDebugBridge(activeModel, rawListener) { isManuallyStopped.get() })
         } catch (e: Exception) {
             Log.e(TAG, "Error initiating WebSocket connection: ${e.message}", e)
+            isConnecting.set(false)
             listener.onError("Connection failed: ${e.message}", isFatal = true, errorCode = "CONNECTION_FAILED")
             listener.onConnectionStateChanged("OFFLINE")
         }
@@ -230,11 +319,6 @@ class GeminiLiveWebSocket(
                         })
                     })
                     put("temperature", 0.6)
-                    if (activeModel.contains("2.5")) {
-                        put("thinkingConfig", JSONObject().apply {
-                            put("thinkingBudget", 0)
-                        })
-                    }
                 })
                 put("tools", JSONArray().put(JSONObject().apply {
                     put("functionDeclarations", JSONArray().apply {
@@ -658,6 +742,7 @@ class GeminiLiveWebSocket(
     }
 
     private fun handleIncomingMessage(jsonText: String) {
+        updateRxTime()
         try {
             val json = JSONObject(jsonText)
 
@@ -688,6 +773,8 @@ class GeminiLiveWebSocket(
             // 0. Server setupComplete handshake acknowledgment
             if (json.has("setupComplete")) {
                 Log.i(TAG, "Server acknowledged setup: setupComplete received. Session is now LIVE!")
+                retryCount = 0
+                isConnecting.set(false)
                 if (!isSetupComplete.getAndSet(true)) {
                     listener.onConnectionStateChanged("LIVE")
                     startSessionRenewal()
@@ -697,6 +784,8 @@ class GeminiLiveWebSocket(
 
             // Ensure session is marked ready if server sends content before explicit setupComplete
             if (!isSetupComplete.get() && (json.has("serverContent") || json.has("toolCall"))) {
+                retryCount = 0
+                isConnecting.set(false)
                 isSetupComplete.set(true)
                 listener.onConnectionStateChanged("LIVE")
                 startSessionRenewal()
@@ -866,7 +955,11 @@ class GeminiLiveWebSocket(
             val json = "{\"realtimeInput\":{\"audio\":{\"mimeType\":\"audio/pcm;rate=16000\",\"data\":\"$base64Audio\"}}}"
             webSocket?.send(json)
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending audio chunk: ${e.message}")
+            if (isManuallyStopped.get()) {
+                Log.d(TAG, "Audio chunk dropped during disconnect: ${e.message}")
+            } else {
+                Log.w(TAG, "Error sending audio chunk: ${e.message}")
+            }
         }
     }
 
@@ -895,7 +988,11 @@ class GeminiLiveWebSocket(
                 Log.i(TAG, "Sent video frame #$mediaChunksSent to Gemini Live (sent=$sent, size=${jpegBytes.size / 1024} KB)")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending media chunk: ${e.message}")
+            if (isManuallyStopped.get()) {
+                Log.d(TAG, "Media chunk dropped during disconnect: ${e.message}")
+            } else {
+                Log.w(TAG, "Error sending media chunk: ${e.message}")
+            }
         }
     }
 
@@ -913,19 +1010,15 @@ class GeminiLiveWebSocket(
     fun sendClientContent(text: String) {
         if (!isConnected.get() || !isSetupComplete.get() || text.isBlank()) return
         try {
+            // Gemini 3.x Live models: clientContent is ONLY for seeding initial history.
+            // Text typed/spoken during the conversation must go through realtimeInput.text.
             val msg = JSONObject().apply {
-                put("clientContent", JSONObject().apply {
-                    put("turns", JSONArray().put(JSONObject().apply {
-                        put("role", "user")
-                        put("parts", JSONArray().put(JSONObject().apply {
-                            put("text", text)
-                        }))
-                    }))
-                    put("turnComplete", true)
+                put("realtimeInput", JSONObject().apply {
+                    put("text", text)
                 })
             }
             webSocket?.send(msg.toString())
-            Log.d(TAG, "Sent clientContent: $text")
+            Log.d(TAG, "Sent realtimeInput.text: $text")
         } catch (e: Exception) {
             Log.e(TAG, "sendClientContent failed: ${e.message}", e)
         }
@@ -940,14 +1033,74 @@ class GeminiLiveWebSocket(
                 webSocket?.close(1000, "Session renewal")
             }
         }
+        startHeartbeatMonitor()
     }
 
-    private fun scheduleReconnect() {
+    private fun updateRxTime() {
+        lastRxTimeMs.set(android.os.SystemClock.elapsedRealtime())
+    }
+
+    private var heartbeatCheckCounter = 0L
+
+    private fun startHeartbeatMonitor() {
+        heartbeatJob?.cancel()
+        updateRxTime()
+        heartbeatCheckCounter = 0L
+        heartbeatJob = coroutineScope?.launch(Dispatchers.IO) {
+            while (isActive && isConnected.get() && !isManuallyStopped.get()) {
+                delay(5000L) // Perform heartbeat checks every 5 seconds for precise stall detection
+                heartbeatCheckCounter++
+                val now = android.os.SystemClock.elapsedRealtime()
+                val elapsedSilence = now - lastRxTimeMs.get()
+                val isReady = isSessionReady()
+
+                Log.d(
+                    TAG,
+                    "💓 [Heartbeat Check #$heartbeatCheckCounter] Socket state: ${if (isReady) "READY/LIVE" else if (isConnected.get()) "CONNECTED (configuring)" else "DISCONNECTED"} | " +
+                            "elapsedSilence=${elapsedSilence}ms / 30000ms limit | model=$activeModel | pingInterval=15s"
+                )
+
+                if (elapsedSilence > 30000L && isReady) {
+                    Log.w(
+                        TAG,
+                        "💔 [Heartbeat Timeout] Connection stalled: No frame, Ping, or Pong received in ${elapsedSilence}ms (>30s limit). Proactively cancelling socket and reconnecting..."
+                    )
+                    isConnected.set(false)
+                    isSetupComplete.set(false)
+                    try {
+                        webSocket?.cancel()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error cancelling dead socket during heartbeat: ${e.message}")
+                    } finally {
+                        webSocket = null
+                    }
+                    listener.onConnectionStateChanged("RECONNECTING...")
+                    scheduleReconnect(forceDelayMs = 0L)
+                    break
+                }
+            }
+        }
+    }
+
+    private fun scheduleReconnect(forceDelayMs: Long? = null) {
+        if (isManuallyStopped.get()) return
+        if (retryCount >= 12 && !isSetupComplete.get()) {
+            Log.e(TAG, "Giving up after $retryCount failed attempts (model=$activeModel)")
+            listener.onError("Cannot reach Gemini Live after $retryCount attempts. Check internet, API key, and that the key can use $activeModel.", isFatal = true, errorCode = "CONNECT_FAILED")
+            listener.onConnectionStateChanged("ERROR • CANNOT CONNECT")
+            return
+        }
         reconnectJob?.cancel()
         reconnectJob = coroutineScope?.launch(Dispatchers.IO) {
-            delay(500)
+            val delayMs = forceDelayMs ?: run {
+                val base = 1000L * (1 shl minOf(retryCount, 5)) // 1s, 2s, 4s, 8s, 16s, 32s
+                val jitter = (0..500).random().toLong()
+                (base + jitter).coerceAtMost(30000L)
+            }
+            retryCount++
+            Log.d(TAG, "Scheduling auto-reconnect in ${delayMs}ms (attempt #$retryCount)")
+            delay(delayMs)
             if (!isManuallyStopped.get()) {
-                Log.d(TAG, "Attempting auto-reconnect...")
                 initiateConnection()
             }
         }
@@ -956,21 +1109,33 @@ class GeminiLiveWebSocket(
     private fun stopTimers() {
         sessionRenewalJob?.cancel()
         sessionRenewalJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
 
     fun disconnect() {
         isManuallyStopped.set(true)
+        isConnecting.set(false)
         stopTimers()
         reconnectJob?.cancel()
         reconnectJob = null
         isConnected.set(false)
+        isSetupComplete.set(false)
+        retryCount = 0
 
-        try {
-            webSocket?.close(1000, "Client stopped session")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing webSocket: ${e.message}")
-        } finally {
-            webSocket = null
+        val ws = webSocket
+        webSocket = null
+        if (ws != null) {
+            try {
+                val enqueuedClose = ws.close(1000, "Client stopped session")
+                if (!enqueuedClose) {
+                    ws.cancel()
+                }
+            } catch (e: Exception) {
+                try {
+                    ws.cancel()
+                } catch (_: Exception) {}
+            }
         }
         listener.onConnectionStateChanged("OFFLINE")
     }

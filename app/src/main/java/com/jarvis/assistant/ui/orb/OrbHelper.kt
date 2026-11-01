@@ -54,17 +54,75 @@ class OrbHelper(
         settings.useWideViewPort = true
         settings.cacheMode = WebSettings.LOAD_NO_CACHE
 
-        // Add JavaScript Interface for Native-Web Bridge
+        fun getMainActivity(): com.jarvis.assistant.ui.home.MainActivity? {
+            var ctx = webView.context
+            while (ctx is android.content.ContextWrapper) {
+                if (ctx is com.jarvis.assistant.ui.home.MainActivity) return ctx
+                ctx = ctx.baseContext
+            }
+            return (listener as? androidx.fragment.app.Fragment)?.activity as? com.jarvis.assistant.ui.home.MainActivity
+        }
+
+        // Add JavaScript Interface for Native-Web Bridge linked directly to PermissionManager
         webView.addJavascriptInterface(object {
             @JavascriptInterface
+            fun requestAllPermissions() {
+                android.util.Log.d("OrbHelper", "requestAllPermissions triggered from WebView")
+                webView.post {
+                    val activity = getMainActivity()
+                    if (activity != null) {
+                        if (!com.jarvis.assistant.util.PermissionManager.hasRecordAudioPermission(activity)) {
+                            activity.requestUnifiedPermissionsThenStart()
+                        } else {
+                            activity.handleMicOrOrbClick()
+                        }
+                    } else {
+                        listener?.onOrbClicked()
+                    }
+                }
+            }
+
+            @JavascriptInterface
             fun onOrbClicked() {
-                webView.post { listener?.onOrbClicked() }
+                android.util.Log.d("OrbHelper", "onOrbClicked triggered from WebView")
+                webView.post {
+                    val activity = getMainActivity()
+                    if (activity != null) {
+                        activity.handleMicOrOrbClick()
+                    } else {
+                        listener?.onOrbClicked()
+                    }
+                }
             }
 
             @JavascriptInterface
             fun onMicClicked() {
                 android.util.Log.d("OrbHelper", "onMicClicked triggered from WebView")
-                webView.post { listener?.onMicClicked() }
+                webView.post {
+                    val activity = getMainActivity()
+                    if (activity != null) {
+                        activity.handleMicOrOrbClick()
+                    } else {
+                        listener?.onMicClicked()
+                    }
+                }
+            }
+
+            @JavascriptInterface
+            fun checkAndRequestVoicePermissions() {
+                webView.post {
+                    getMainActivity()?.requestUnifiedPermissionsThenStart()
+                }
+            }
+
+            @JavascriptInterface
+            fun hasVoicePermissions(): Boolean {
+                return com.jarvis.assistant.util.PermissionManager.hasVoicePermissions(webView.context)
+            }
+
+            @JavascriptInterface
+            fun hasAllPermissions(): Boolean {
+                return com.jarvis.assistant.util.PermissionManager.hasUnifiedPermissions(webView.context)
             }
 
             @JavascriptInterface
@@ -91,24 +149,7 @@ class OrbHelper(
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                isLoaded = true
-
-                pendingTime?.let { updateLiveTime(it) }
-                pendingStatus?.let { updateConnectionStatus(it) }
-                pendingPower?.let { updatePowerState(it) }
-                pendingMicMuted?.let { updateMicMuted(it) }
-                pendingScreenShare?.let { updateScreenShareState(it) }
-                pendingState?.let { updateState(it, pendingAudioLevel ?: 0f) }
-                pendingTurns?.let { updateChatTurns(it) }
-
-                pendingTime = null
-                pendingStatus = null
-                pendingPower = null
-                pendingMicMuted = null
-                pendingScreenShare = null
-                pendingState = null
-                pendingAudioLevel = null
-                pendingTurns = null
+                markLoaded()
             }
         }
 
@@ -118,8 +159,26 @@ class OrbHelper(
                 return true
             }
         }
+    }
 
-        webView.loadUrl("file:///android_asset/hud/index.html")
+    fun markLoaded() {
+        isLoaded = true
+        pendingTime?.let { updateLiveTime(it) }
+        pendingStatus?.let { updateConnectionStatus(it) }
+        pendingPower?.let { updatePowerState(it) }
+        pendingMicMuted?.let { updateMicMuted(it) }
+        pendingScreenShare?.let { updateScreenShareState(it) }
+        pendingState?.let { updateState(it, pendingAudioLevel ?: 0f) }
+        pendingTurns?.let { updateChatTurns(it) }
+
+        pendingTime = null
+        pendingStatus = null
+        pendingPower = null
+        pendingMicMuted = null
+        pendingScreenShare = null
+        pendingState = null
+        pendingAudioLevel = null
+        pendingTurns = null
     }
 
     fun updateState(state: ConversationState, audioLevel: Float = 0f) {

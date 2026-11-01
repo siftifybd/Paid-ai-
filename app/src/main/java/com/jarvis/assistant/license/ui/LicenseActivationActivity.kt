@@ -35,6 +35,12 @@ class LicenseActivationActivity : AppCompatActivity() {
     private val licenseManager by lazy { LicenseManager.getInstance(this) }
     private var countdownJob: Job? = null
 
+    private val requestPermissionsLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        handleExit()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityLicenseActivationBinding.inflate(layoutInflater)
@@ -134,9 +140,16 @@ class LicenseActivationActivity : AppCompatActivity() {
                     } else "Lifetime"
                     binding.tvFeedbackMessage.text = "License verified successfully!\nPlan Tier: ${result.tier.uppercase()}\nValid until: $expiryStr\nDevice slot: ${result.boundDevicesCount} / ${result.maxDevices}\n\nসব প্রিমিয়াম ফিচার আনলক করা হয়েছে।"
                     binding.etLicenseKey.setText("")
-                    Toast.makeText(this@LicenseActivationActivity, "🎉 Premium unlocked! সব প্রিমিয়াম ফিচার আনলক করা হয়েছে।", Toast.LENGTH_LONG).show()
-                    delay(1200L)
-                    handleExit()
+                    val missingPerms = com.jarvis.assistant.util.PermissionManager.getMissingPremiumPermissions(this@LicenseActivationActivity)
+                    if (missingPerms.isNotEmpty()) {
+                        Toast.makeText(this@LicenseActivationActivity, "🎉 Premium unlocked! প্রিমিয়াম পারমিশনগুলো এলাউ করুন।", Toast.LENGTH_SHORT).show()
+                        delay(700L)
+                        requestPermissionsLauncher.launch(missingPerms)
+                    } else {
+                        Toast.makeText(this@LicenseActivationActivity, "🎉 Premium unlocked! সব প্রিমিয়াম ফিচার সক্রিয়।", Toast.LENGTH_LONG).show()
+                        delay(1200L)
+                        handleExit()
+                    }
                 }
                 is ActivationResult.InvalidKey -> {
                     binding.tvFeedbackTitle.text = "❌ INVALID LICENSE KEY"

@@ -132,7 +132,14 @@ class HomeFragment : Fragment(), OrbHelper.OrbListener {
         binding.btnWifiRemoteShortcut.setOnClickListener {
             val licenseManager = com.jarvis.assistant.license.LicenseManager.getInstance(requireContext())
             if (licenseManager.isPremiumActive.value) {
-                com.jarvis.assistant.nexus.ui.NexusActivity.start(requireContext())
+                val mainAct = activity as? MainActivity
+                if (mainAct != null && !com.jarvis.assistant.util.PermissionManager.hasWifiPermissions(requireContext())) {
+                    mainAct.requestPermissionsForFeature("Wi-Fi Remote") {
+                        com.jarvis.assistant.nexus.ui.NexusActivity.start(requireContext())
+                    }
+                } else {
+                    com.jarvis.assistant.nexus.ui.NexusActivity.start(requireContext())
+                }
             } else {
                 android.widget.Toast.makeText(requireContext(), "🔒 Wi-Fi Remote প্রিমিয়াম ফিচারটি লক করা আছে। অনুগ্রহ করে লাইসেন্স কী দিন।", android.widget.Toast.LENGTH_LONG).show()
                 com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
@@ -197,6 +204,7 @@ class HomeFragment : Fragment(), OrbHelper.OrbListener {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     isPageLoaded = true
+                    orbHelper?.markLoaded()
 
                     // Sync Theme
                     val currentTheme = pendingThemeKey ?: preferences.appTheme
@@ -215,6 +223,51 @@ class HomeFragment : Fragment(), OrbHelper.OrbListener {
             }
 
             loadUrl("file:///android_asset/orb.html?embedded=1")
+        }
+
+        binding.orbContainer.setOnClickListener {
+            (activity as? MainActivity)?.let { mainAct ->
+                mainAct.triggerHapticFeedback(45L)
+                mainAct.handleMicOrOrbClick()
+            }
+        }
+        binding.orbContainer.setOnLongClickListener {
+            (activity as? MainActivity)?.let { mainAct ->
+                mainAct.triggerHapticFeedback(75L)
+                mainAct.handleHoldMicOrOrb()
+            }
+            true
+        }
+
+        var orbTouchDownX = 0f
+        var orbTouchDownY = 0f
+        var orbTouchDownTime = 0L
+
+        binding.orbWebView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    orbTouchDownX = event.x
+                    orbTouchDownY = event.y
+                    orbTouchDownTime = System.currentTimeMillis()
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = Math.abs(event.x - orbTouchDownX)
+                    val dy = Math.abs(event.y - orbTouchDownY)
+                    val dt = System.currentTimeMillis() - orbTouchDownTime
+                    if (dt < 500 && dx < 45 && dy < 45) {
+                        (activity as? MainActivity)?.let { mainAct ->
+                            mainAct.triggerHapticFeedback(45L)
+                            mainAct.handleMicOrOrbClick()
+                        }
+                    } else if (dt >= 700 && dx < 45 && dy < 45) {
+                        (activity as? MainActivity)?.let { mainAct ->
+                            mainAct.triggerHapticFeedback(75L)
+                            mainAct.handleHoldMicOrOrb()
+                        }
+                    }
+                }
+            }
+            false
         }
     }
 
@@ -646,8 +699,18 @@ class HomeFragment : Fragment(), OrbHelper.OrbListener {
         _binding = null
     }
 
-    override fun onOrbClicked() {}
-    override fun onMicClicked() { (activity as? MainActivity)?.handleMicOrOrbClick() }
+    override fun onOrbClicked() {
+        (activity as? MainActivity)?.let { mainAct ->
+            mainAct.triggerHapticFeedback(45L)
+            mainAct.handleMicOrOrbClick()
+        }
+    }
+    override fun onMicClicked() {
+        (activity as? MainActivity)?.let { mainAct ->
+            mainAct.triggerHapticFeedback(45L)
+            mainAct.handleMicOrOrbClick()
+        }
+    }
     override fun onPowerClicked() { (activity as? MainActivity)?.handlePowerClick() }
     override fun onSettingsClicked() { (activity as? MainActivity)?.selectTab(MainActivity.TAB_SETTINGS) }
     override fun onHistoryClicked() {}

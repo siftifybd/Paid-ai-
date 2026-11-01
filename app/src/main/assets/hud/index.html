@@ -812,17 +812,29 @@
   window.syncChatTurns = function() {};
 
   // Interactive Click Handlers (Connecting to Native Android Bridge)
-  reactorAssembly.addEventListener('click', function() {
-    if (window.JarvisBridge && window.JarvisBridge.onOrbClicked) {
-      window.JarvisBridge.onOrbClicked();
+  function handleMicOrOrbInteraction(e) {
+    if (e) e.stopPropagation();
+    if (window.JarvisBridge) {
+      if (typeof window.JarvisBridge.requestAllPermissions === 'function') {
+        window.JarvisBridge.requestAllPermissions();
+      } else if (typeof window.JarvisBridge.onMicClicked === 'function') {
+        window.JarvisBridge.onMicClicked();
+      } else if (typeof window.JarvisBridge.onOrbClicked === 'function') {
+        window.JarvisBridge.onOrbClicked();
+      }
     }
-  });
+  }
 
-  btnMic.addEventListener('click', function() {
-    if (window.JarvisBridge && window.JarvisBridge.onMicClicked) {
-      window.JarvisBridge.onMicClicked();
-    }
-  });
+  if (reactorAssembly) {
+    reactorAssembly.addEventListener('click', handleMicOrOrbInteraction);
+  }
+  if (arcCore) {
+    arcCore.addEventListener('click', handleMicOrOrbInteraction);
+  }
+
+  if (btnMic) {
+    btnMic.addEventListener('click', handleMicOrOrbInteraction);
+  }
 
   btnPower.addEventListener('click', function() {
     if (window.JarvisBridge && window.JarvisBridge.onPowerClicked) {

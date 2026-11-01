@@ -101,10 +101,72 @@ object PermissionHelper {
         }
     }
 
+    fun hasBasicVoicePermissions(context: Context): Boolean {
+        return hasRecordAudioPermission(context) && hasNotificationPermission(context)
+    }
+
     fun hasAllRequiredPermissions(context: Context): Boolean {
-        return hasRecordAudioPermission(context) &&
-               hasNotificationPermission(context) &&
-               hasBatteryOptimizationPermission(context)
+        return hasBasicVoicePermissions(context)
+    }
+
+    fun getMissingBasicPermissions(context: Context): Array<String> {
+        val missing = mutableListOf<String>()
+        if (!hasRecordAudioPermission(context)) {
+            missing.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission(context)) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        return missing.toTypedArray()
+    }
+
+    fun hasBluetoothPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    fun hasPhonePermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CALL_PHONE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun hasSmsPermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.SEND_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun getMissingPremiumPermissions(context: Context): Array<String> {
+        val missing = mutableListOf<String>()
+        if (!hasLocationPermission(context)) {
+            missing.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            missing.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        if (!hasContactsPermission(context)) {
+            missing.add(Manifest.permission.READ_CONTACTS)
+        }
+        if (!hasCameraPermission(context)) {
+            missing.add(Manifest.permission.CAMERA)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission(context)) {
+            missing.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (!hasPhonePermission(context)) {
+            missing.add(Manifest.permission.CALL_PHONE)
+        }
+        if (!hasSmsPermission(context)) {
+            missing.add(Manifest.permission.SEND_SMS)
+        }
+        return missing.toTypedArray()
     }
 
     fun requestBatteryOptimization(context: Context) {

@@ -53,9 +53,8 @@ class ApiConnectionActivity : AppCompatActivity() {
         binding.etCustomEndpoint.setText(preferences.customEndpoint)
 
         when (preferences.aiModel) {
-            GeminiConstants.MODEL_3_8_LIVE -> binding.rbModelFlash20.isChecked = true
-            GeminiConstants.MODEL_3_1_FLASH_AGENT -> binding.rbModelFlash15.isChecked = true
-            else -> binding.rbModelFlashThinking.isChecked = true
+            GeminiConstants.MODEL_3_8_LIVE_THINKING -> binding.rbModelFlash15.isChecked = true
+            else -> binding.rbModelFlash20.isChecked = true
         }
 
         if (preferences.apiKey.isNotBlank()) {
@@ -148,9 +147,8 @@ class ApiConnectionActivity : AppCompatActivity() {
         val customEp = binding.etCustomEndpoint.text?.toString()?.trim() ?: ""
 
         val selectedModel = when (binding.rgModelGroup.checkedRadioButtonId) {
-            binding.rbModelFlash20.id -> GeminiConstants.MODEL_3_8_LIVE
-            binding.rbModelFlash15.id -> GeminiConstants.MODEL_3_1_FLASH_AGENT
-            else -> GeminiConstants.MODEL_3_1_FLASH
+            binding.rbModelFlash15.id -> GeminiConstants.MODEL_3_8_LIVE_THINKING
+            else -> GeminiConstants.MODEL_3_8_LIVE
         }
 
         preferences.apiKey = key

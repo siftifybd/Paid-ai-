@@ -3,21 +3,25 @@ package com.jarvis.assistant.data.model
 import com.google.gson.annotations.SerializedName
 
 object GeminiConstants {
-    const val MODEL_3_1_FLASH = "gemini-2.0-flash-exp"
-    const val MODEL_3_8_LIVE = "gemini-2.0-flash-exp"
-    const val MODEL_3_1_FLASH_AGENT = "gemini-2.0-flash-exp"
-    const val MODEL_2_0_FLASH = "gemini-2.0-flash-exp"
-    const val MODEL_2_0_FLASH_REALTIME = "gemini-2.0-flash-exp"
-    const val MODEL_1_5_FLASH = "gemini-1.5-flash"
+    // Current Gemini Live API models (checked against ai.google.dev deprecations page, Oct 2026).
+    // "gemini-2.0-flash-exp" no longer exists on the Live API -> that was the cause of endless RECONNECTING.
+    const val MODEL_3_8_LIVE = "gemini-3.8-live"
+    const val MODEL_3_8_LIVE_THINKING = "gemini-3.8-live-extended-thinking"
+
+    // Legacy aliases kept so old call sites still compile; all point to a VALID Live model.
+    const val MODEL_3_1_FLASH = MODEL_3_8_LIVE
+    const val MODEL_3_1_FLASH_AGENT = MODEL_3_8_LIVE_THINKING
+    const val MODEL_2_0_FLASH = MODEL_3_8_LIVE
+    const val MODEL_2_0_FLASH_REALTIME = MODEL_3_8_LIVE
+    const val MODEL_1_5_FLASH = MODEL_3_8_LIVE
 
     const val RELEASE_API_KEY = ""
 
-    const val DEFAULT_MODEL = MODEL_3_1_FLASH
+    const val DEFAULT_MODEL = MODEL_3_8_LIVE
 
     val SUPPORTED_MODELS = listOf(
-        MODEL_3_1_FLASH,
         MODEL_3_8_LIVE,
-        MODEL_3_1_FLASH_AGENT
+        MODEL_3_8_LIVE_THINKING
     )
 
     const val DEFAULT_LANGUAGE = "Auto"

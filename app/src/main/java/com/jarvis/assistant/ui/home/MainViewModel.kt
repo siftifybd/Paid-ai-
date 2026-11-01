@@ -130,19 +130,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             turnOffSession()
         } else {
             val context = getApplication<Application>()
-            if (!PermissionHelper.hasAllRequiredPermissions(context)) {
+            if (!PermissionHelper.hasBasicVoicePermissions(context)) {
                 viewModelScope.launch {
-                    _eventFlow.emit("Please allow all permissions in Settings to activate Jarvis.")
+                    _eventFlow.emit("REQUEST_BASIC_PERMISSIONS")
                 }
                 return
             }
             val apiKey = preferences.apiKey.trim()
             if (apiKey.isBlank()) {
                 viewModelScope.launch {
-                    _eventFlow.emit("Please configure your Gemini API Key in Settings first.")
+                    _eventFlow.emit("অনুগ্রহ করে সেটিংস থেকে Gemini API Key কনফিগার করুন।")
                 }
                 return
             }
+            sendServiceAction(JarvisConversationService.ACTION_START_CONVERSATION)
+        }
+    }
+
+    fun restartOrStartSession() {
+        val context = getApplication<Application>()
+        if (!PermissionHelper.hasBasicVoicePermissions(context)) {
+            viewModelScope.launch {
+                _eventFlow.emit("REQUEST_BASIC_PERMISSIONS")
+            }
+            return
+        }
+        val apiKey = preferences.apiKey.trim()
+        if (apiKey.isBlank()) {
+            viewModelScope.launch {
+                _eventFlow.emit("অনুগ্রহ করে সেটিংস থেকে Gemini API Key কনফিগার করুন।")
+            }
+            return
+        }
+        if (JarvisConversationService.isSessionOn.value) {
+            JarvisConversationService.restartSession()
+            viewModelScope.launch {
+                _eventFlow.emit("Reconnecting to Gemini Live...")
+            }
+        } else {
             sendServiceAction(JarvisConversationService.ACTION_START_CONVERSATION)
         }
     }

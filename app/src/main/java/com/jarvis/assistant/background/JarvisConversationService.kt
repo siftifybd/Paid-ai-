@@ -736,7 +736,7 @@ class JarvisConversationService : Service() {
                 errorCode = "PERMISSIONS_MISSING",
                 actionText = "GRANT PERMISSIONS"
             )
-            serviceScope.launch { _events.emit("Please allow all required permissions in Settings to use Jarvis.") }
+            serviceScope.launch { _events.emit("মাইক্রোফোন ও নোটিফিকেশন পারমিশন প্রয়োজন।") }
             fullStop()
             return
         }

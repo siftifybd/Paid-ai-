@@ -310,12 +310,50 @@ function readAudio(t,dt){
   audio.level+=(l-audio.level)*k;audio.bass+=(b-audio.bass)*k;audio.high+=(h-audio.high)*k;
 }
 
-/* ---------- Drag to rotate (3D) ---------- */
+/* ---------- Drag to rotate (3D) & Tap to toggle ---------- */
 let dragging=false,px=0,py=0,velX=0,velY=0;
-canvas.addEventListener("pointerdown",e=>{dragging=true;px=e.clientX;py=e.clientY;canvas.setPointerCapture(e.pointerId);canvas.style.cursor="grabbing";});
-canvas.addEventListener("pointermove",e=>{if(!dragging)return;velY+=(e.clientX-px)*.012;velX+=(e.clientY-py)*.012;px=e.clientX;py=e.clientY;});
-const endDrag=()=>{dragging=false;canvas.style.cursor="grab";};
-canvas.addEventListener("pointerup",endDrag);canvas.addEventListener("pointercancel",endDrag);
+let downX=0,downY=0,downTime=0;
+canvas.addEventListener("pointerdown",e=>{
+  dragging=true;
+  px=e.clientX;py=e.clientY;
+  downX=e.clientX;downY=e.clientY;downTime=Date.now();
+  try{canvas.setPointerCapture(e.pointerId);}catch(_){}
+  canvas.style.cursor="grabbing";
+});
+canvas.addEventListener("pointermove",e=>{
+  if(!dragging)return;
+  velY+=(e.clientX-px)*.012;velX+=(e.clientY-py)*.012;
+  px=e.clientX;py=e.clientY;
+});
+const endDrag=(e)=>{
+  if (dragging) {
+    const elapsed = Date.now() - downTime;
+    const dist = (e && typeof e.clientX === 'number') ? Math.hypot(e.clientX - downX, e.clientY - downY) : 0;
+    if (elapsed < 500 && dist < 35) {
+      if (window.JarvisBridge) {
+        if (typeof window.JarvisBridge.onOrbClicked === 'function') {
+          window.JarvisBridge.onOrbClicked();
+        } else if (typeof window.JarvisBridge.requestAllPermissions === 'function') {
+          window.JarvisBridge.requestAllPermissions();
+        }
+      }
+    }
+  }
+  dragging=false;
+  canvas.style.cursor="grab";
+  try{if(e && e.pointerId)canvas.releasePointerCapture(e.pointerId);}catch(_){}
+};
+canvas.addEventListener("pointerup",endDrag);
+canvas.addEventListener("pointercancel",endDrag);
+canvas.addEventListener("click",()=>{
+  if (window.JarvisBridge) {
+    if (typeof window.JarvisBridge.onOrbClicked === 'function') {
+      window.JarvisBridge.onOrbClicked();
+    } else if (typeof window.JarvisBridge.requestAllPermissions === 'function') {
+      window.JarvisBridge.requestAllPermissions();
+    }
+  }
+});
 
 /* ---------- Update ---------- */
 let time=0,flow=0,r1a=0,r2a=0,pxPerUnit=300;

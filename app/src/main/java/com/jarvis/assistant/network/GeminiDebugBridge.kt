@@ -9,16 +9,17 @@ import okio.ByteString
 /**
  * Diagnostic bridge class 'GeminiDebugBridge' that intercepts WebSocket frame negotiation,
  * logs exact handshake packets between the Android app and Gemini, and validates that
- * the model 'gemini-2.0-flash-exp' is correctly accepted by the server.
+ * the model 'gemini-3.8-live' is correctly accepted by the server.
  */
 class GeminiDebugBridge(
     private val originalModel: String,
-    private val delegateListener: WebSocketListener
+    private val delegateListener: WebSocketListener,
+    private val isManuallyStopped: (() -> Boolean)? = null
 ) : WebSocketListener() {
 
     companion object {
         private const val TAG = "GeminiDebugBridge"
-        const val TARGET_STABLE_MODEL = "gemini-2.0-flash-exp"
+        const val TARGET_STABLE_MODEL = "gemini-3.8-live"
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -63,13 +64,22 @@ class GeminiDebugBridge(
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         val code = response?.code ?: 0
-        val body = try { response?.body?.string() } catch (_: Exception) { null }
-        Log.e(TAG, "❌ [GeminiDebugBridge] WebSocket onFailure: code=$code, error=${t.message}, body=$body", t)
-        
-        if (response != null) {
-            Log.e(TAG, "📋 [Failure Response Headers]:")
-            for (i in 0 until response.headers.size) {
-                Log.e(TAG, "   ${response.headers.name(i)}: ${response.headers.value(i)}")
+        val isSocketClosed = (t is java.net.SocketException && (t.message?.contains("closed", ignoreCase = true) == true || t.message?.contains("Socket is closed", ignoreCase = true) == true)) ||
+                t is java.io.InterruptedIOException ||
+                t is java.util.concurrent.CancellationException
+        val isIntentional = isManuallyStopped?.invoke() == true || isSocketClosed
+
+        if (isIntentional) {
+            Log.d(TAG, "ℹ️ [GeminiDebugBridge] WebSocket session closed or cancelled (${t.javaClass.simpleName}: ${t.message})")
+        } else {
+            val body = try { response?.body?.string() } catch (_: Exception) { null }
+            Log.e(TAG, "❌ [GeminiDebugBridge] WebSocket onFailure: code=$code, error=${t.message}, body=$body", t)
+            
+            if (response != null) {
+                Log.e(TAG, "📋 [Failure Response Headers]:")
+                for (i in 0 until response.headers.size) {
+                    Log.e(TAG, "   ${response.headers.name(i)}: ${response.headers.value(i)}")
+                }
             }
         }
 
