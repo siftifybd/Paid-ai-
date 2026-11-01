@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import com.jarvis.assistant.R
 import com.jarvis.assistant.databinding.ActivitySystemUpdateBinding
 import com.jarvis.assistant.license.LicenseManager
+import com.jarvis.assistant.util.AppUpdater
 import kotlinx.coroutines.launch
 import androidx.activity.OnBackPressedCallback
 
@@ -90,11 +91,41 @@ class SystemUpdateActivity : AppCompatActivity() {
                 binding.btnDownloadUpdate.visibility = View.VISIBLE
                 binding.btnDownloadUpdate.setOnClickListener {
                     if (update.downloadUrl.isNotBlank()) {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl))
-                            startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(this@SystemUpdateActivity, "Unable to open download URL: ${e.message}", Toast.LENGTH_SHORT).show()
+                        lifecycleScope.launch {
+                            binding.btnDownloadUpdate.isEnabled = false
+                            binding.tvUpdateStatusTitle.text = "Downloading Update..."
+                            val expectedSha = update.checksumSha256.takeIf { it.isNotBlank() }
+
+                            val result = AppUpdater.downloadAndInstall(
+                                context = this@SystemUpdateActivity,
+                                downloadUrl = update.downloadUrl,
+                                expectedSha256 = expectedSha,
+                                onProgress = { progressPercent, downloadedBytes, totalBytes ->
+                                    runOnUiThread {
+                                        if (progressPercent >= 0) {
+                                            binding.tvUpdateStatusDetails.text = "Downloading: $progressPercent%\n(${downloadedBytes / (1024 * 1024)} MB)"
+                                        } else {
+                                            binding.tvUpdateStatusDetails.text = "Downloading... (${downloadedBytes / 1024} KB)"
+                                        }
+                                    }
+                                }
+                            )
+
+                            result.onSuccess {
+                                binding.btnDownloadUpdate.isEnabled = true
+                                binding.tvUpdateStatusTitle.text = "Installing Update..."
+                                Toast.makeText(this@SystemUpdateActivity, "Launching package installer...", Toast.LENGTH_SHORT).show()
+                            }.onFailure { error ->
+                                binding.btnDownloadUpdate.isEnabled = true
+                                Toast.makeText(this@SystemUpdateActivity, "Direct update failed: ${error.message}", Toast.LENGTH_LONG).show()
+                                // Fallback to browser download if in-app updater fails
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl))
+                                    startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(this@SystemUpdateActivity, "Unable to open download URL: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     } else {
                         Toast.makeText(this@SystemUpdateActivity, "Download URL is not configured by Admin", Toast.LENGTH_SHORT).show()

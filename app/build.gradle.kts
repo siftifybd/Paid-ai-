@@ -106,9 +106,9 @@ dependencies {
     // ML Kit Text Recognition for OCR
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
 
-    // Firebase (BOM, Analytics, Firestore, Auth)
+    // Firebase (BOM, Firestore, Auth)
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
-    implementation("com.google.firebase:firebase-analytics")
+    // implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-auth-ktx")
 
