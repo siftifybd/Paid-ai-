@@ -53,6 +53,10 @@ class LicenseManager private constructor(private val context: Context) {
                 INSTANCE ?: LicenseManager(context.applicationContext).also { INSTANCE = it }
             }
         }
+
+        fun isPremium(context: Context): Boolean {
+            return getInstance(context).isPremium()
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -83,7 +87,10 @@ class LicenseManager private constructor(private val context: Context) {
     private val _currentTier = MutableStateFlow(securePrefs.getString(KEY_TIER, TIER_BASIC) ?: TIER_BASIC)
     val currentTier: StateFlow<String> = _currentTier.asStateFlow()
 
-    private val _isPremiumActive = MutableStateFlow(checkIsPremiumActive(_currentTier.value) || _isDeviceActiveInFirestore.value)
+    private val _isPremiumActive = MutableStateFlow(
+        checkIsPremiumActive(securePrefs.getString(KEY_TIER, TIER_BASIC) ?: TIER_BASIC) &&
+        (securePrefs.getLong(KEY_EXPIRES_AT, 0L) == 0L || securePrefs.getLong(KEY_EXPIRES_AT, 0L) > System.currentTimeMillis())
+    )
     val isPremiumActive: StateFlow<Boolean> = _isPremiumActive.asStateFlow()
 
     private val _activeLicenseKey = MutableStateFlow(securePrefs.getString(KEY_LICENSE_KEY, null))
@@ -387,6 +394,20 @@ class LicenseManager private constructor(private val context: Context) {
 
     private fun checkIsPremiumActive(tier: String): Boolean {
         return tier.equals(TIER_PRO, ignoreCase = true) || tier.equals(TIER_MASTER, ignoreCase = true)
+    }
+
+    /**
+     * Central entitlement verification method.
+     * Returns true ONLY if device has an active, valid, non-expired PRO or MASTER tier license.
+     * In Basic mode, returns false (restricting all phone control and automation).
+     */
+    fun isPremium(): Boolean {
+        val now = System.currentTimeMillis()
+        val exp = _expiresAt.value
+        val hasNotExpired = (exp == 0L || exp > now)
+        val tier = _currentTier.value.lowercase().trim()
+        val isTierPremium = tier == TIER_PRO || tier == TIER_MASTER
+        return (_isPremiumActive.value || isTierPremium) && hasNotExpired && tier != TIER_BASIC
     }
 
     /**

@@ -30,4 +30,22 @@ sealed class JarvisCommand {
     object GoToBackground : JarvisCommand()
     object LockPhone : JarvisCommand()
     object ShowUnlockScreen : JarvisCommand()
+
+    fun isPremiumRequired(): Boolean {
+        return when (this) {
+            is Remember,
+            is Forget,
+            is WhatDoYouRemember,
+            is RecallBirthday,
+            is RecallFavoriteSong,
+            is RecallRoutine,
+            is GoToBackground -> false
+            else -> true
+        }
+    }
+
+    companion object {
+        const val PREMIUM_LOCK_MESSAGE = "🔒 এই ফিচারটি ব্যবহারের জন্য JARVIS Premium লাইসেন্স প্রয়োজন। সম্পূর্ণ ফোন কন্ট্রোল, অ্যাপ ওপেন ও অটোমেশন আনলক করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।"
+        const val PREMIUM_LOCK_SPOKEN = "এই ফিচারটি ব্যবহার করতে প্রিমিয়াম লাইসেন্স প্রয়োজন। সম্পূর্ণ ফোন কন্ট্রোল ও অটোমেশন আনলক করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।"
+    }
 }

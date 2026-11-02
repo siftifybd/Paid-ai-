@@ -19,6 +19,18 @@ import com.jarvis.assistant.ui.settings.PhoneLockUnlockActivity
 object FeatureExecutionEngine {
 
     fun execute(context: Context, feature: JarvisFeatureItem, isDryRun: Boolean): String {
+        val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(context).isPremium()
+        if (!isPremium && !isDryRun) {
+            return """
+                [🔒 FEATURE LOCKED • PREMIUM REQUIRED]
+                Feature #${feature.id}: ${feature.title}
+                Category: ${feature.category}
+                
+                এই ফিচারটি চালানোর জন্য JARVIS Premium লাইসেন্স প্রয়োজন।
+                সম্পূর্ণ ফোন কন্ট্রোল, অটোমেশন ও এআই এজেন্ট ফিচার আনলক করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।
+            """.trimIndent()
+        }
+
         if (isDryRun) {
             return """
                 [DRY-RUN SIMULATION COMPLETED]

@@ -329,6 +329,16 @@ class ChatFragment : Fragment(), TextToSpeech.OnInitListener {
         }
 
         val repo = JarvisApp.instance.chatRepository
+        val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(requireContext()).isPremium()
+        val parsed = com.jarvis.assistant.automation.command.CommandParser.parse(text)
+        if (parsed.command != null && parsed.command.isPremiumRequired() && !isPremium) {
+            repo.addTurn(fullMessage, com.jarvis.assistant.automation.command.JarvisCommand.PREMIUM_LOCK_MESSAGE)
+            binding.etMessageInput.text?.clear()
+            clearAttachment()
+            showPremiumLockedDialog(parsed.command::class.java.simpleName)
+            return
+        }
+
         repo.addTurn(fullMessage, "Jarvis is thinking...")
 
         binding.etMessageInput.text?.clear()
@@ -362,6 +372,17 @@ class ChatFragment : Fragment(), TextToSpeech.OnInitListener {
                 it.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_TTS_ID")
             }
         }
+    }
+
+    private fun showPremiumLockedDialog(actionName: String) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("🔒 JARVIS Premium Required")
+            .setMessage("এই ফিচারটি ($actionName) বেসিক মোডে লক রয়েছে।\n\nসম্পূর্ণ ফোন কন্ট্রোল, অ্যাপ ওপেন ও অটোমেশন সক্রিয় করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স কী দিন।")
+            .setPositiveButton("লাইসেন্স সক্রিয় করুন 🗝️") { _, _ ->
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(requireContext())
+            }
+            .setNegativeButton("বন্ধ করুন", null)
+            .show()
     }
 
     private fun showCreateReminderDialog() {

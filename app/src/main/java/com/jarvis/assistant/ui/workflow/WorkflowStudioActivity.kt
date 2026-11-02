@@ -42,6 +42,13 @@ class WorkflowStudioActivity : AppCompatActivity() {
         }
 
         adapter = WorkflowAdapter { routine ->
+            val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+            if (!isPremium) {
+                Toast.makeText(this, "🔒 Premium Required: রুটিন অটোমেশন চালাতে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।", Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+                return@WorkflowAdapter
+            }
+
             binding.bannerExecutionProgress.visibility = View.VISIBLE
             binding.tvExecutingRoutineStatus.text = "Starting ${routine.name}..."
 

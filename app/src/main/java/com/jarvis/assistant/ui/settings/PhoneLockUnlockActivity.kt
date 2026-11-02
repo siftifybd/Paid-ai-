@@ -58,6 +58,15 @@ class PhoneLockUnlockActivity : AppCompatActivity() {
         }
 
         btnTestLock.setOnClickListener {
+            val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+            if (!isPremium) {
+                tvActionOutput.text = "🔒 ফোন লক ফিচারটি প্রিমিয়াম ব্যবহারকারীদের জন্য সংরক্ষিত। অনুগ্রহ করে লাইসেন্স সক্রিয় করুন।"
+                tvActionOutput.setTextColor(Color.parseColor("#F59E0B"))
+                Toast.makeText(this, "🔒 Premium Required: ফোন লক ফিচার আনলক করতে লাইসেন্স দিন।", Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+                return@setOnClickListener
+            }
+
             if (!adminHelper.isDeviceAdminActive()) {
                 tvActionOutput.text = "Error: Device Admin permission not granted. Please activate admin first."
                 tvActionOutput.setTextColor(Color.parseColor("#FF5252"))
@@ -77,6 +86,15 @@ class PhoneLockUnlockActivity : AppCompatActivity() {
         }
 
         btnTestUnlock.setOnClickListener {
+            val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+            if (!isPremium) {
+                tvActionOutput.text = "🔒 আনলক স্ক্রিন টুলটি প্রিমিয়াম ব্যবহারকারীদের জন্য সংরক্ষিত। অনুগ্রহ করে লাইসেন্স সক্রিয় করুন।"
+                tvActionOutput.setTextColor(Color.parseColor("#F59E0B"))
+                Toast.makeText(this, "🔒 Premium Required: আনলক স্ক্রিন ফিচার আনলক করতে লাইসেন্স দিন।", Toast.LENGTH_LONG).show()
+                com.jarvis.assistant.license.ui.LicenseActivationActivity.start(this)
+                return@setOnClickListener
+            }
+
             tvActionOutput.text = "Launching system keyguard dismissal prompt..."
             tvActionOutput.setTextColor(Color.parseColor("#00E5FF"))
             val intent = Intent(this, UnlockPromptActivity::class.java)

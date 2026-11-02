@@ -685,6 +685,7 @@ class JarvisConversationService : Service() {
         return withContext(Dispatchers.IO) {
             val memoryContext = app.memoryManager.getSystemPromptContext()
             val favSong = app.memoryManager.resolveSongQuery("my favorite song")
+            val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(app).isPremium()
             com.jarvis.assistant.util.PromptGenerator.generateSystemPrompt(
                 personality = preferences.personality,
                 userName = preferences.userName,
@@ -694,7 +695,8 @@ class JarvisConversationService : Service() {
                 userLocation = preferences.userLocation,
                 isTorchOn = app.phoneControlManager.isTorchOn,
                 language = preferences.language,
-                isSilentExecutionMode = preferences.isSilentExecutionMode
+                isSilentExecutionMode = preferences.isSilentExecutionMode,
+                isPremium = isPremium
             )
         }
     }
@@ -1631,6 +1633,25 @@ class JarvisConversationService : Service() {
                 hasExecutedCommandInCurrentTurn = true
                 lastCommandExecutionTime = System.currentTimeMillis()
                 suppressAudioUntilTurnComplete = false
+
+                val isPremiumUser = com.jarvis.assistant.license.LicenseManager.getInstance(this@JarvisConversationService).isPremium()
+                val isPhoneControlOrAutomationTool = name in setOf(
+                    "open_app", "open_website", "search_in_chrome", "builtin_chrome_search",
+                    "search_and_play_youtube", "search_youtube", "youtube_accessibility_action",
+                    "media_playback_control", "send_whatsapp_message", "whatsapp_call",
+                    "call_contact", "set_volume", "set_brightness", "set_flashlight",
+                    "click_ui_element", "type_text", "scroll_screen", "press_key"
+                )
+                if (!isPremiumUser && isPhoneControlOrAutomationTool) {
+                    Log.w("JarvisService", "Tool '$name' BLOCKED by Premium Lock.")
+                    liveWebSocket?.sendToolResponse(callId, name, JSONObject().apply {
+                        put("success", false)
+                        put("premium_locked", true)
+                        put("message", "PREMIUM_LOCKED: Device automation, app launching, and phone controls are locked in Basic mode. Inform the user in their language (e.g. Bengali) that this feature requires JARVIS Premium, and ask them to activate their Premium license to unlock it.")
+                    })
+                    announce("এই ফিচারটি ব্যবহার করতে প্রিমিয়াম লাইসেন্স প্রয়োজন। ফোন কন্ট্রোল ও অটোমেশন আনলক করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।")
+                    return@withTimeout
+                }
 
                 val isAutomationTool = name in setOf(
                     "open_app", "open_website", "search_in_chrome",
@@ -2661,6 +2682,18 @@ class JarvisConversationService : Service() {
         }
 
         if (cmd != null && parsed.confidence >= 0.90f) {
+            val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+            if (!isPremium && cmd.isPremiumRequired()) {
+                lastHandledCommandText = cleanSpeech
+                Log.w("JarvisService", "Local voice command '$cmd' BLOCKED by Premium Lock.")
+                announce(com.jarvis.assistant.automation.command.JarvisCommand.PREMIUM_LOCK_SPOKEN)
+                app.chatRepository.addTurn(
+                    cleanSpeech,
+                    com.jarvis.assistant.automation.command.JarvisCommand.PREMIUM_LOCK_MESSAGE
+                )
+                return
+            }
+
             // If the requested video/song is too vague or could easily be a mis-hearing
             // (e.g. Jarvis only caught one short/filler word), confirm with the user
             // instead of guessing and playing the wrong thing.
@@ -2701,6 +2734,11 @@ class JarvisConversationService : Service() {
      * Guarded by [hasExecutedCommandInCurrentTurn] to prevent duplicate execution in the same turn.
      */
     private fun checkAssistantTextForCommands(assistantText: String) {
+        val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+        if (!isPremium) {
+            // In basic mode, assistant speech is purely conversational. Never trigger hardware commands.
+            return
+        }
         if (hasExecutedCommandInCurrentTurn || (System.currentTimeMillis() - lastCommandExecutionTime < 3500L)) return
         val rawClean = assistantText.trim()
         val clean = rawClean.lowercase(java.util.Locale.ROOT).trimEnd('.', '!', '?', ',', ' ')
@@ -2876,6 +2914,12 @@ class JarvisConversationService : Service() {
         if (command is com.jarvis.assistant.automation.command.JarvisCommand.GoToBackground) {
             minimizeToHomeScreen()
             enterStandby(announce = false)
+            return
+        }
+        val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(this).isPremium()
+        if (command.isPremiumRequired() && !isPremium) {
+            Log.w("JarvisService", "Blocked detected command $command: Premium required.")
+            announce(com.jarvis.assistant.automation.command.JarvisCommand.PREMIUM_LOCK_SPOKEN)
             return
         }
         hasExecutedCommandInCurrentTurn = true

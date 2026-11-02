@@ -45,6 +45,13 @@ class CommandExecutor(
     }
 
     suspend fun execute(command: JarvisCommand): String = withContext(Dispatchers.Main) {
+        val app = com.jarvis.assistant.JarvisApp.instance
+        val isPremium = com.jarvis.assistant.license.LicenseManager.getInstance(app).isPremium()
+        if (command.isPremiumRequired() && !isPremium) {
+            Log.w(TAG, "Command '${command::class.java.simpleName}' BLOCKED: Premium License required.")
+            return@withContext JarvisCommand.PREMIUM_LOCK_MESSAGE
+        }
+
         val startTime = System.currentTimeMillis()
         Log.i(TAG, "Executing command: $command")
         val result = when (command) {

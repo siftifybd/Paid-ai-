@@ -16,7 +16,8 @@ object PromptGenerator {
         userLocation: String = "",
         isTorchOn: Boolean = false,
         language: String = GeminiConstants.DEFAULT_LANGUAGE,
-        isSilentExecutionMode: Boolean = false
+        isSilentExecutionMode: Boolean = false,
+        isPremium: Boolean = false
     ): String {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val currentDateTime = dateFormat.format(Date())
@@ -98,6 +99,39 @@ object PromptGenerator {
 """.trimIndent()
         }
 
+        val tierInstruction = if (!isPremium) {
+            """
+[TIER RESTRICTION — BASIC FREE MODE (NO PHONE CONTROL / NO APP LAUNCHING / NO AUTOMATION)]:
+- You are currently running in FREE / BASIC AI TIER.
+- ALLOWED CAPABILITIES IN BASIC TIER:
+  * Voice conversation, answering questions, knowledge queries, friendly chat, emotional companionship, problem solving, explanations, and advice.
+  * You can talk smoothly in any language (Bengali, Hindi, English, etc.).
+- STRICTLY FORBIDDEN & LOCKED IN BASIC TIER:
+  * ALL phone controls, hardware toggles, app launches, and automations are COMPLETELY LOCKED.
+  * ❌ NEVER turn flashlight / torch on or off.
+  * ❌ NEVER open any apps (e.g. YouTube, WhatsApp, Settings, Chrome, Camera, Instagram, etc.).
+  * ❌ NEVER play songs, music, or videos on YouTube.
+  * ❌ NEVER send WhatsApp messages or make WhatsApp calls.
+  * ❌ NEVER make phone calls to contacts.
+  * ❌ NEVER open websites or URLs in browser/Chrome.
+  * ❌ NEVER adjust phone volume or screen brightness.
+  * ❌ NEVER lock or unlock the phone.
+  * ❌ DO NOT call any tools to manipulate phone hardware or launch apps!
+- CRITICAL REFUSAL MANDATE:
+  * When the user gives ANY command for phone control, opening apps, playing music, sending messages, opening websites, or adjusting settings:
+  * YOU MUST IMMEDIATELY AND POLITELY REFUSE IN THE USER'S CURRENT LANGUAGE and explain that this feature requires JARVIS Premium!
+  * If the user is speaking in Bengali: "এই ফিচারটি ব্যবহার করতে JARVIS Premium লাইসেন্স প্রয়োজন। ফোন কন্ট্রোল, অ্যাপ ওপেন ও অটোমেশন আনলক করতে অনুগ্রহ করে প্রিমিয়াম লাইসেন্স সক্রিয় করুন।"
+  * If speaking in English: "This feature requires JARVIS Premium. Device control, app launching, and automation are locked in basic mode. Please activate your Premium license to unlock full phone control!"
+  * If speaking in Hindi/Hinglish: "इस फीचर को इस्तेमाल करने के लिए JARVIS Premium लाइसेंस की आवश्यकता है। फोन कंट्रोल और ऐप ऑटोमーション अनलॉक करने के लिए कृपया प्रीमियम एक्टिवेट करें।"
+""".trimIndent()
+        } else {
+            """
+[TIER STATUS: JARVIS PREMIUM UNLOCKED — FULL AUTONOMOUS AI AGENT]:
+- ALL features, device controls, app launchers, YouTube playback, WhatsApp messaging, browser browsing, flashlight, volume, brightness, phone locking, and automation are 100% UNLOCKED and ACTIVE!
+- Proactively assist the user by using tools and device actions.
+""".trimIndent()
+        }
+
         return """
 You are JARVIS, the legendary artificial intelligence voice assistant.
 
@@ -115,6 +149,8 @@ $memoryContext
 $personalityInstruction
 
 $languageInstruction
+
+$tierInstruction
 
 [REAL-TIME CONVERSATIONAL MANDATE — ULTRA-SMOOTH LIKE A REAL HUMAN]:
 - You are speaking on a live voice phone call in real time.
